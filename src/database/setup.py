@@ -51,6 +51,32 @@ CREATE TABLE IF NOT EXISTS users (
     last_login    TEXT,
     is_active     BOOLEAN NOT NULL DEFAULT TRUE
 );
+
+CREATE TABLE IF NOT EXISTS conversations (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id    INTEGER NOT NULL,
+    title      TEXT    NOT NULL DEFAULT 'Nova conversa',
+    created_at TEXT    NOT NULL,
+    updated_at TEXT    NOT NULL,
+    is_active  BOOLEAN NOT NULL DEFAULT TRUE,
+    FOREIGN KEY (user_id) REFERENCES users(id)
+);
+
+CREATE TABLE IF NOT EXISTS messages (
+    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    conversation_id     INTEGER NOT NULL,
+    role                TEXT    NOT NULL,
+    content             TEXT    NOT NULL,
+    agent_used          TEXT,
+    provider            TEXT,
+    data_classification TEXT,
+    pii_detected        BOOLEAN DEFAULT FALSE,
+    timestamp           TEXT    NOT NULL,
+    FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_messages_conversation ON messages(conversation_id, timestamp ASC);
+CREATE INDEX IF NOT EXISTS idx_conversations_user ON conversations(user_id, updated_at DESC)
 """
 
 
