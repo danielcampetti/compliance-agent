@@ -24,9 +24,9 @@ ComplianceAgent is a multi-agent RAG-based assistant for Brazilian financial com
 
 ## Project Phases
 
-### Phase 1 — Basic RAG System [CURRENT]
+### Phase 1 — Basic RAG System [Complete]
 Functional RAG pipeline: ingest BCB PDFs → vector store → answer questions with citations.
-**Status:** In Progress
+**Status:** Complete
 
 Modules:
 - `src/config.py` — Central Pydantic Settings config (llm_provider, claude_model, anthropic_api_key)
@@ -140,6 +140,7 @@ PII masking (LGPD), structured logging, automated RAG evals, GitHub Actions CI/C
 | src/agents/data_agent.py | ✅ Done |
 | src/agents/action_agent.py | ✅ Done |
 | src/agents/coordinator.py | ✅ Done |
+| src/evaluation/benchmark.py | ✅ Done |
 
 ## Running Locally (Phase 1)
 
@@ -181,10 +182,26 @@ curl -X POST http://localhost:8000/test-pipeline -H "Content-Type: application/j
 
 ## Evaluation System (Phase 1 Extension)
 
-`POST /diagnostic` — Returns the raw chunks retrieved from ChromaDB with scores and a preview of the assembled prompt. No LLM call. Use this to debug retrieval quality.
+`POST /diagnostic` — Inspects all three stages of the RAG pipeline without calling the LLM. Returns:
+- `busca_vetorial`: top-50 vector search candidates with cosine similarity scores
+- `expansao_documento`: regulations detected in the query, chunks fetched, dedup count, bypass flag
+- `reranking`: cross-encoder reranking results (null when reranker was bypassed for small documents)
+- `chunks_enviados_ao_llm`: count of final chunks that would be sent to the LLM
 
-`POST /evaluate` — Takes a `pergunta` + `resposta` pair. Retrieves context, then sends both to Claude with a 5-criterion scoring rubric (relevância, precisão, citação de fontes, completude, clareza). Returns JSON scores + justification.
+`POST /evaluate` — Takes `pergunta` + `resposta_rag` (+ optional `resposta_esperada`). Uses Claude as judge with 5 compliance-specific criteria:
+- `precisao_normativa` — accuracy of regulatory citations
+- `completude` — coverage of all relevant aspects
+- `relevancia_chunks` — quality of retrieved context
+- `coerencia` — logical consistency of the answer
+- `alucinacao` — absence of fabricated content (10 = no hallucination)
+- Returns `nota_geral` + `veredicto` (APROVADO ≥7.0 / REPROVADO <7.0)
 
-`POST /test-pipeline` — Runs one question through both Ollama (local) and Claude (API) in parallel using the same retrieved context, then uses Claude to compare both responses. Good for benchmarking local vs cloud quality.
+`POST /test-pipeline` — Runs the full pipeline: retrieves chunks via RAG, generates answer with Ollama, evaluates with Claude. Returns `chunks_recuperados`, `resposta_ollama`, `avaliacao`, and `tempo_resposta_segundos`.
 
-`POST /chat` now accepts an optional `"provider": "claude"` field to route a single request to Claude instead of Ollama.
+`python -m src.evaluation.benchmark` — Batch runner across 15 compliance test questions (`src/evaluation/test_dataset.json`). Covers prazo, PLD, and segurança cibernética categories. Saves results to `data/benchmark_report.json`.
+```bash
+python -m src.evaluation.benchmark          # all 15 questions
+python -m src.evaluation.benchmark --limit 3  # first 3 only
+```
+
+`POST /chat` accepts an optional `"provider": "claude"` field to route a single request to Claude instead of Ollama.
