@@ -95,6 +95,37 @@ React frontend, real-time SSE streaming, document management panel, JWT auth.
 ### Phase 4 — Governance & Observability [FUTURE]
 PII masking (LGPD), structured logging, automated RAG evals, GitHub Actions CI/CD.
 
+### Phase 6 — Conversation Memory [CURRENT]
+**Status:** Complete
+
+Architecture:
+```
+User → POST /agent {conversation_id: N}
+     → ConversationService.get_context_messages()  → last 10 msgs as history
+     → ConversationService.add_message(user_msg)
+     → CoordinatorAgent.process(history=...)
+         → KnowledgeAgent.answer(history=...)
+             → build_prompt(question, chunks, conversation_history=history)
+     → ConversationService.add_message(assistant_msg)
+```
+
+New modules:
+- `src/services/conversation.py` — ConversationService (create, list_by_user, get_by_id, get_messages, add_message, update_title, delete, get_context_messages, auto_title)
+- `src/api/conversation_routes.py` — CRUD router at /conversations
+
+New tables: `conversations`, `messages` (with cascade delete)
+
+API endpoints:
+- `GET  /conversations`              — list user's conversations (auth required)
+- `POST /conversations`              — create conversation (auth required)
+- `GET  /conversations/{id}`         — messages + metadata (auth, must own)
+- `DELETE /conversations/{id}`       — soft-delete (auth, must own)
+- `PATCH /conversations/{id}/title`  — rename (auth, must own)
+
+Context injection: last 10 messages fed into `build_prompt()` between system prompt and RAG chunks. RAG retrieval still uses current question only.
+
+Frontend: 280px collapsible sidebar with date-grouped history, click-to-load, auto-title on first message, mobile hamburger toggle.
+
 ## Architecture Decisions
 
 - **Local-first:** Zero cloud dependency. Ollama for LLM, sentence-transformers for embeddings.
@@ -142,6 +173,8 @@ PII masking (LGPD), structured logging, automated RAG evals, GitHub Actions CI/C
 | src/agents/action_agent.py | ✅ Done |
 | src/agents/coordinator.py | ✅ Done |
 | src/evaluation/benchmark.py | ✅ Done |
+| src/services/conversation.py | ✅ Done |
+| src/api/conversation_routes.py | ✅ Done |
 
 ## Running Locally (Phase 1)
 
