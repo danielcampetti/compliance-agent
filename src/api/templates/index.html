@@ -489,6 +489,39 @@
             opacity: 0.7;
         }
 
+        /* ── Provider toggle ─────────────────────────────── */
+        .provider-toggle {
+            display: flex;
+            align-items: center;
+            gap: 0;
+            border: 1px solid var(--border);
+            border-radius: 5px;
+            overflow: hidden;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.57rem;
+            letter-spacing: 0.08em;
+        }
+
+        .provider-btn {
+            padding: 4px 9px;
+            background: transparent;
+            border: none;
+            color: var(--text-3);
+            cursor: pointer;
+            transition: background .15s, color .15s;
+            white-space: nowrap;
+        }
+
+        .provider-btn.active {
+            background: var(--gold-glow);
+            color: var(--gold);
+        }
+
+        .provider-btn.active.claude-active {
+            background: rgba(147, 112, 219, 0.12);
+            color: #a07ad0;
+        }
+
         /* ── Responsive ──────────────────────────────────── */
         @media (max-width: 580px) {
             header, #messages, #input-area { padding-left: 14px; padding-right: 14px; }
@@ -506,6 +539,10 @@
         </div>
         <div class="header-right">
             <span class="doc-count" id="doc-count" title="Documentos indexados"></span>
+            <div class="provider-toggle" id="provider-toggle" title="Selecionar provedor LLM">
+                <button class="provider-btn active" id="btn-ollama" onclick="setProvider('ollama')">OLLAMA</button>
+                <button class="provider-btn" id="btn-claude" onclick="setProvider('claude')">CLAUDE</button>
+            </div>
             <div class="status"><div class="status-dot"></div>ONLINE</div>
         </div>
     </header>
@@ -542,6 +579,13 @@
     const input  = document.getElementById('question');
     const btn    = document.getElementById('send');
     let loading  = false;
+    let currentProvider = 'ollama';
+
+    function setProvider(p) {
+        currentProvider = p;
+        document.getElementById('btn-ollama').className = 'provider-btn' + (p === 'ollama' ? ' active' : '');
+        document.getElementById('btn-claude').className = 'provider-btn' + (p === 'claude' ? ' active claude-active' : '');
+    }
 
     // Load doc count on start
     fetch('/documents').then(r => r.json()).then(d => {
@@ -721,14 +765,18 @@
             const res = await fetch('/agent', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ pergunta: q })
+                body: JSON.stringify({ pergunta: q, provider: currentProvider })
             });
             if (!res.ok) throw new Error('HTTP ' + res.status);
             const data = await res.json();
             hideTyping();
             appendAgentResponse(data);
         } catch (err) {
-            appendError('Não foi possível obter resposta. Verifique se o Ollama está em execução (ollama serve).');
+            appendError(
+                currentProvider === 'claude'
+                    ? 'Erro ao obter resposta do Claude. Verifique se ANTHROPIC_API_KEY está configurado.'
+                    : 'Não foi possível obter resposta. Verifique se o Ollama está em execução (ollama serve).'
+            );
         } finally {
             loading = false;
             btn.disabled = false;
