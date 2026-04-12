@@ -207,6 +207,63 @@ python -m src.evaluation.benchmark --limit 3  # first 3 only
 
 `POST /chat` accepts an optional `"provider": "claude"` field to route a single request to Claude instead of Ollama.
 
+## Multi-LLM Support
+
+ComplianceAgent supports two LLM backends for generation. The default is always Ollama (local, no cost). Claude is available for higher-quality demos and comparative benchmarking.
+
+### Switching Providers
+
+**Via API (per-request):**
+```bash
+# Chat endpoint with Claude
+curl -X POST http://localhost:8000/chat \
+  -H "Content-Type: application/json" \
+  -d '{"pergunta": "O que é PLD?", "provider": "claude"}'
+
+# Agent endpoint with Claude
+curl -X POST http://localhost:8000/agent \
+  -H "Content-Type: application/json" \
+  -d '{"pergunta": "Qual o prazo da Resolução 5.274?", "provider": "claude"}'
+```
+
+**Via environment variable (default for all requests):**
+```bash
+export LLM_PROVIDER=claude
+uvicorn src.api.main:app --reload
+```
+
+**In the browser UI:** Use the `OLLAMA | CLAUDE` toggle in the top-right header.
+
+**Important:** If `provider: "claude"` is requested but `ANTHROPIC_API_KEY` is not set, the API returns HTTP 503 with a clear error message.
+
+### LLM Router
+
+`src/llm/llm_router.py` provides a unified `generate(prompt, provider)` interface used by all agents. Agents no longer call `ollama_client` or `claude_client` directly — they call the router.
+
+### Comparative Benchmarking
+
+```bash
+# Run benchmark with Ollama (default)
+python -m src.evaluation.benchmark
+
+# Run benchmark with Claude
+python -m src.evaluation.benchmark --provider claude
+
+# Run both and print side-by-side comparison
+python -m src.evaluation.benchmark --compare
+
+# Quick test with 3 questions
+python -m src.evaluation.benchmark --compare --limit 3
+```
+
+Results are saved to date-stamped files:
+- `data/benchmark_ollama_YYYY-MM-DD.json`
+- `data/benchmark_claude_YYYY-MM-DD.json`
+
+The `--compare` output diagnoses whether low scores are caused by model quality (Claude scores high, Ollama scores low) or pipeline issues (both score low on the same questions).
+
+Cost tracking: Claude benchmark runs print estimated generation cost in USD using Sonnet pricing ($3/MTok input, $15/MTok output).
+
 ## RAG Quality Improvements (Benchmark-Driven)
 
 **Benchmark baseline (before fixes):** 4/15 passed (27%), avg score 4.2/10
