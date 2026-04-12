@@ -66,3 +66,27 @@ class KnowledgeAgent:
             sources=sources,
             confidence=0.9,
         )
+
+    async def prepare(
+        self,
+        question: str,
+        conversation_history: Optional[list[dict]] = None,
+    ) -> tuple[str | None, list]:
+        """Retrieve chunks and build prompt without calling the LLM.
+
+        Use this with the streaming endpoint: it returns the assembled prompt and
+        retrieved chunks so the caller can stream the LLM response itself.
+
+        Args:
+            question: Natural language question in Portuguese.
+            conversation_history: Optional prior messages for multi-turn context.
+
+        Returns:
+            Tuple of (prompt_string, chunks). Returns (None, []) when no
+            relevant chunks are found.
+        """
+        chunks = retrieve(question)
+        if not chunks:
+            return None, []
+        prompt = build_prompt(question, chunks, conversation_history=conversation_history)
+        return prompt, chunks
