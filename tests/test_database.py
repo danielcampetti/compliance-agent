@@ -60,3 +60,44 @@ def test_get_db_rolls_back_on_exception(tmp_db):
 def test_row_factory_is_set(tmp_db):
     with get_db() as conn:
         assert conn.row_factory == sqlite3.Row
+
+
+from src.database.seed import init_db
+
+
+def test_seed_inserts_50_transactions(tmp_db):
+    init_db()
+    with get_db() as conn:
+        count = conn.execute("SELECT COUNT(*) FROM transactions").fetchone()[0]
+    assert count == 50
+
+
+def test_seed_inserts_5_alerts(tmp_db):
+    init_db()
+    with get_db() as conn:
+        count = conn.execute("SELECT COUNT(*) FROM alerts").fetchone()[0]
+    assert count == 5
+
+
+def test_seed_is_idempotent(tmp_db):
+    init_db()
+    init_db()
+    with get_db() as conn:
+        count = conn.execute("SELECT COUNT(*) FROM transactions").fetchone()[0]
+    assert count == 50
+
+
+def test_unreported_large_cash_deposits(tmp_db):
+    init_db()
+    with get_db() as conn:
+        count = conn.execute(
+            "SELECT COUNT(*) FROM transactions WHERE transaction_type='deposito_especie' AND amount >= 50000 AND reported_to_coaf=0"
+        ).fetchone()[0]
+    assert count == 2
+
+
+def test_pep_transactions_exist(tmp_db):
+    init_db()
+    with get_db() as conn:
+        count = conn.execute("SELECT COUNT(*) FROM transactions WHERE pep_flag=1").fetchone()[0]
+    assert count == 3
