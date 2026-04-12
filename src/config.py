@@ -22,7 +22,7 @@ class Settings(BaseSettings):
     embedding_model: str = "all-MiniLM-L6-v2"
 
     # Reranking model (local, no API key required)
-    reranker_model: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"
+    reranker_model: str = "cross-encoder/mmarco-mMiniLMv2-L12-H384-v1"
 
     # Chunking parameters
     chunk_size: int = 800

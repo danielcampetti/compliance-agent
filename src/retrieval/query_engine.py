@@ -11,7 +11,7 @@ Pipeline (single-document queries — named regulation with ≤30 chunks):
 1–3. Same as above
 4. BYPASS reranker — return ALL chunks from the named document directly.
    The document is small enough to fit in one LLM context window, and the
-   English-trained cross-encoder cannot reliably rank Portuguese legal prose.
+   multilingual cross-encoder may over-compress small-document results.
 """
 from __future__ import annotations
 
