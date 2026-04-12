@@ -196,6 +196,12 @@ async def agent_endpoint(
 
     conversation_history = None
     if request.conversation_id is not None:
+        # Verify ownership before any read or write
+        if svc.get_by_id(request.conversation_id, current_user.user_id) is None:
+            raise HTTPException(
+                status_code=404,
+                detail="Conversa não encontrada ou sem permissão de acesso.",
+            )
         # Snapshot history BEFORE saving current message (these are the prior exchanges)
         conversation_history = svc.get_context_messages(
             request.conversation_id, max_messages=10
