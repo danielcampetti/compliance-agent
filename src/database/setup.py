@@ -76,7 +76,44 @@ CREATE TABLE IF NOT EXISTS messages (
 );
 
 CREATE INDEX IF NOT EXISTS idx_messages_conversation ON messages(conversation_id, timestamp ASC);
-CREATE INDEX IF NOT EXISTS idx_conversations_user ON conversations(user_id, updated_at DESC)
+CREATE INDEX IF NOT EXISTS idx_conversations_user ON conversations(user_id, updated_at DESC);
+
+CREATE TABLE IF NOT EXISTS audit_log (
+    id                   INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id           TEXT    NOT NULL,
+    timestamp            TEXT    NOT NULL,
+    agent_name           TEXT    NOT NULL,
+    action               TEXT    NOT NULL,
+    input_original       TEXT,
+    input_masked         TEXT,
+    output_original      TEXT,
+    output_masked        TEXT,
+    input_has_pii        BOOLEAN NOT NULL DEFAULT FALSE,
+    output_has_pii       BOOLEAN NOT NULL DEFAULT FALSE,
+    pii_types_detected   TEXT,
+    data_classification  TEXT    NOT NULL,
+    provider             TEXT    NOT NULL,
+    model                TEXT    NOT NULL,
+    tokens_used          INTEGER NOT NULL DEFAULT 0,
+    chunks_count         INTEGER NOT NULL DEFAULT 0,
+    retention_expires_at TEXT    NOT NULL,
+    pii_purged           BOOLEAN NOT NULL DEFAULT FALSE,
+    user_id              INTEGER,
+    username             TEXT
+);
+
+CREATE TABLE IF NOT EXISTS governance_daily_stats (
+    date                        TEXT    PRIMARY KEY,
+    total_queries               INTEGER NOT NULL DEFAULT 0,
+    queries_with_pii            INTEGER NOT NULL DEFAULT 0,
+    classification_public       INTEGER NOT NULL DEFAULT 0,
+    classification_internal     INTEGER NOT NULL DEFAULT 0,
+    classification_confidential INTEGER NOT NULL DEFAULT 0,
+    classification_restricted   INTEGER NOT NULL DEFAULT 0,
+    pii_cpf_count               INTEGER NOT NULL DEFAULT 0,
+    pii_name_count              INTEGER NOT NULL DEFAULT 0,
+    pii_money_count             INTEGER NOT NULL DEFAULT 0
+)
 """
 
 
@@ -90,13 +127,19 @@ def create_tables() -> None:
 
 
 def migrate_audit_log_add_user_columns() -> None:
-    """Add user_id/username to audit_log if missing (idempotent)."""
+    """Add user_id/username to audit_log if missing (idempotent).
+
+    Only needed for databases created before these columns were added to the DDL.
+    Safe to call on any database — new columns are already present in CREATE TABLE.
+    """
     with get_db() as conn:
-        cols = {row[1] for row in conn.execute("PRAGMA table_info(agent_log)")}
+        cols = {row[1] for row in conn.execute("PRAGMA table_info(audit_log)")}
+        if not cols:
+            return  # Table doesn't exist yet — CREATE TABLE IF NOT EXISTS will handle it
         if "user_id" not in cols:
-            conn.execute("ALTER TABLE agent_log ADD COLUMN user_id INTEGER")
+            conn.execute("ALTER TABLE audit_log ADD COLUMN user_id INTEGER")
         if "username" not in cols:
-            conn.execute("ALTER TABLE agent_log ADD COLUMN username TEXT")
+            conn.execute("ALTER TABLE audit_log ADD COLUMN username TEXT")
 
 
 if __name__ == "__main__":
