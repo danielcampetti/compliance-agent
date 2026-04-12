@@ -8,6 +8,7 @@ from src.retrieval.query_engine import retrieve, RetrievedChunk
 
 def _mock_chroma_query_result(docs: list, scores: list) -> dict:
     return {
+        "ids": [[f"id{i}" for i in range(len(docs))]],
         "documents": [docs],
         "metadatas": [[{"source": f"doc{i}.pdf", "page": i + 1} for i in range(len(docs))]],
         "distances": [scores],
@@ -59,6 +60,7 @@ def test_retrieve_results_sorted_by_score_descending() -> None:
 def test_retrieve_result_carries_metadata() -> None:
     mock_collection = MagicMock()
     mock_collection.query.return_value = {
+        "ids": [["id0"]],
         "documents": [["Texto sobre PLD."]],
         "metadatas": [[{"source": "circ3978.pdf", "page": 7}]],
         "distances": [[0.1]],
