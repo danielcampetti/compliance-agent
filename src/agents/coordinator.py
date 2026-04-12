@@ -11,7 +11,7 @@ from src.agents.data_agent import DataAgent
 from src.agents.knowledge_agent import KnowledgeAgent
 from src.database.connection import get_db
 from src.database.seed import init_db
-from src.llm import ollama_client
+from src.llm import llm_router
 
 _ROUTING_PROMPT = """\
 Você é um roteador de agentes de compliance financeiro. Classifique a intenção da pergunta.
@@ -41,6 +41,7 @@ class CoordinatorResponse(BaseModel):
     resposta_final: str
     detalhes_agentes: list[dict]
     log_id: int
+    provider_utilizado: str
 
 
 class CoordinatorAgent:
@@ -51,20 +52,29 @@ class CoordinatorAgent:
         self.data_agent = DataAgent()
         self.action_agent = ActionAgent()
 
-    async def process(self, question: str) -> CoordinatorResponse:
+    async def process(self, question: str, provider: str = "ollama") -> CoordinatorResponse:
+        """Classify and route a question to the appropriate agent(s).
+
+        Args:
+            question: Natural language question in Portuguese.
+            provider: LLM backend — "ollama" (default) or "claude".
+
+        Returns:
+            CoordinatorResponse with the final answer and routing metadata.
+        """
         init_db()
-        routing = await self._classify(question)
+        routing = await self._classify(question, provider=provider)
         details: list[dict] = []
         agents_used: list[str] = []
 
         if routing == "KNOWLEDGE":
-            response = await self.knowledge_agent.answer(question)
+            response = await self.knowledge_agent.answer(question, provider=provider)
             details.append(_to_detail(response))
             agents_used.append("knowledge")
             final = response.answer
 
         elif routing == "DATA":
-            response = await self.data_agent.answer(question)
+            response = await self.data_agent.answer(question, provider=provider)
             details.append(_to_detail(response))
             agents_used.append("data")
             final = response.answer
@@ -76,9 +86,9 @@ class CoordinatorAgent:
             final = response.answer
 
         else:  # KNOWLEDGE+DATA
-            k_resp = await self.knowledge_agent.answer(question)
+            k_resp = await self.knowledge_agent.answer(question, provider=provider)
             d_resp = await self.data_agent.answer(
-                question, extra_context=k_resp.answer
+                question, extra_context=k_resp.answer, provider=provider
             )
             details.extend([_to_detail(k_resp), _to_detail(d_resp)])
             agents_used.extend(["knowledge", "data"])
@@ -95,12 +105,13 @@ class CoordinatorAgent:
             resposta_final=final,
             detalhes_agentes=details,
             log_id=log_id,
+            provider_utilizado=provider,
         )
 
-    async def _classify(self, question: str) -> str:
+    async def _classify(self, question: str, provider: str = "ollama") -> str:
         try:
             prompt = _ROUTING_PROMPT.format(question=question)
-            raw = await ollama_client.generate(prompt)
+            raw = await llm_router.generate(prompt, provider=provider)
             classification = raw.strip().upper().split()[0]
             valid = {"KNOWLEDGE", "DATA", "ACTION", "KNOWLEDGE+DATA"}
             if "KNOWLEDGE" in classification and "DATA" in raw.upper():

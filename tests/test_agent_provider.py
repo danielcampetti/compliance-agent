@@ -52,3 +52,27 @@ async def test_data_agent_passes_provider_to_router():
         args = call.args
         kwargs = call.kwargs
         assert kwargs.get("provider") == "claude" or (len(args) > 1 and args[1] == "claude")
+
+
+@pytest.mark.asyncio
+async def test_coordinator_threads_provider_to_knowledge_agent():
+    from src.agents.coordinator import CoordinatorAgent
+
+    mock_k_resp = MagicMock()
+    mock_k_resp.answer = "resposta regulatória"
+    mock_k_resp.sources = []
+    mock_k_resp.data = None
+    mock_k_resp.actions_taken = []
+    mock_k_resp.agent_name = "knowledge"
+
+    with patch("src.agents.coordinator.init_db"), \
+         patch("src.agents.coordinator.CoordinatorAgent._classify", new_callable=AsyncMock, return_value="KNOWLEDGE"), \
+         patch("src.agents.coordinator.CoordinatorAgent._log", return_value=1):
+        coordinator = CoordinatorAgent()
+        coordinator.knowledge_agent = MagicMock()
+        coordinator.knowledge_agent.answer = AsyncMock(return_value=mock_k_resp)
+
+        result = await coordinator.process("Qual o prazo?", provider="claude")
+
+    coordinator.knowledge_agent.answer.assert_awaited_once_with("Qual o prazo?", provider="claude")
+    assert result.provider_utilizado == "claude"

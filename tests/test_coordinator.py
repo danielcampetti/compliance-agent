@@ -40,7 +40,7 @@ class TestCoordinatorProcess:
         coord.data_agent = AsyncMock()
         coord.action_agent = AsyncMock()
 
-        with patch("src.agents.coordinator.ollama_client.generate",
+        with patch("src.agents.coordinator.llm_router.generate",
                    new_callable=AsyncMock, return_value="KNOWLEDGE"), \
              patch("src.agents.coordinator.init_db"), \
              patch.object(coord, "_log", return_value=1):
@@ -49,6 +49,7 @@ class TestCoordinatorProcess:
         assert isinstance(result, CoordinatorResponse)
         assert result.roteamento == "KNOWLEDGE"
         assert "knowledge" in result.agentes_utilizados
+        assert result.provider_utilizado == "ollama"
 
     @pytest.mark.asyncio
     async def test_routes_to_data_agent(self, db_tmp):
@@ -62,7 +63,7 @@ class TestCoordinatorProcess:
         coord.data_agent.answer = AsyncMock(return_value=mock_d_response)
         coord.action_agent = AsyncMock()
 
-        with patch("src.agents.coordinator.ollama_client.generate",
+        with patch("src.agents.coordinator.llm_router.generate",
                    new_callable=AsyncMock, return_value="DATA"), \
              patch("src.agents.coordinator.init_db"), \
              patch.object(coord, "_log", return_value=2):
@@ -71,3 +72,4 @@ class TestCoordinatorProcess:
         assert result.roteamento == "DATA"
         assert "data" in result.agentes_utilizados
         assert result.detalhes_agentes[0]["dados"]["total"] == 50
+        assert result.provider_utilizado == "ollama"
