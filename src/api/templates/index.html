@@ -366,6 +366,129 @@
             letter-spacing: 0.07em;
         }
 
+        /* ── Route badge ─────────────────────────────────── */
+        .route-meta {
+            display: flex;
+            align-items: center;
+            gap: 7px;
+            margin-bottom: 8px;
+            flex-wrap: wrap;
+        }
+
+        .route-badge {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.56rem;
+            letter-spacing: 0.12em;
+            text-transform: uppercase;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-weight: 400;
+        }
+
+        .route-badge.knowledge {
+            background: rgba(200,168,75,0.12);
+            border: 1px solid rgba(200,168,75,0.30);
+            color: var(--gold);
+        }
+
+        .route-badge.data {
+            background: rgba(91,155,213,0.10);
+            border: 1px solid rgba(91,155,213,0.28);
+            color: #7ab3d8;
+        }
+
+        .route-badge.action {
+            background: rgba(78,196,122,0.10);
+            border: 1px solid rgba(78,196,122,0.28);
+            color: #4ec47a;
+        }
+
+        .route-badge.knowledge-data {
+            background: linear-gradient(90deg, rgba(200,168,75,0.10), rgba(91,155,213,0.10));
+            border: 1px solid rgba(150,110,140,0.30);
+            color: #c09ad0;
+        }
+
+        .agent-pill {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.54rem;
+            color: var(--text-3);
+            letter-spacing: 0.08em;
+            padding: 2px 7px;
+            border: 1px solid var(--border-dim);
+            border-radius: 3px;
+        }
+
+        /* ── SQL block ───────────────────────────────────── */
+        .sql-block {
+            margin-top: 9px;
+            border: 1px solid var(--border-dim);
+            border-radius: 7px;
+            overflow: hidden;
+        }
+
+        .sql-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 5px 11px;
+            background: var(--surface-2);
+            cursor: pointer;
+            user-select: none;
+        }
+
+        .sql-label {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.56rem;
+            color: var(--text-3);
+            letter-spacing: 0.1em;
+            text-transform: uppercase;
+        }
+
+        .sql-rows-badge {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.54rem;
+            color: #7ab3d8;
+            letter-spacing: 0.04em;
+        }
+
+        .sql-code {
+            padding: 9px 13px;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.71rem;
+            color: #7ab3d8;
+            background: rgba(91,155,213,0.04);
+            white-space: pre-wrap;
+            word-break: break-word;
+            display: none;
+        }
+
+        .sql-block.open .sql-code { display: block; }
+
+        /* ── Actions taken ───────────────────────────────── */
+        .actions-list {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            margin-top: 9px;
+        }
+
+        .action-item {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.63rem;
+            color: #4ec47a;
+            letter-spacing: 0.02em;
+        }
+
+        .action-item::before {
+            content: '✓';
+            font-size: 0.58rem;
+            opacity: 0.7;
+        }
+
         /* ── Responsive ──────────────────────────────────── */
         @media (max-width: 580px) {
             header, #messages, #input-area { padding-left: 14px; padding-right: 14px; }
@@ -393,10 +516,10 @@
             <h2>Consultoria Regulatória</h2>
             <p>Faça perguntas sobre regulamentação do Banco Central, CVM e CMN. As respostas são fundamentadas exclusivamente nos documentos indexados.</p>
             <div class="chips">
-                <button class="chip" onclick="useChip(this)">O que é política de conformidade?</button>
-                <button class="chip" onclick="useChip(this)">Quais as obrigações de PLD/FT?</button>
                 <button class="chip" onclick="useChip(this)">O que diz a Circular 3.978?</button>
-                <button class="chip" onclick="useChip(this)">Requisitos de cibersegurança</button>
+                <button class="chip" onclick="useChip(this)">Quais as obrigações de PLD/FT?</button>
+                <button class="chip" onclick="useChip(this)">Quantas transações não foram reportadas ao COAF?</button>
+                <button class="chip" onclick="useChip(this)">Gere um relatório de alertas abertos</button>
             </div>
         </div>
     </div>
@@ -426,7 +549,7 @@
         if (d.total > 0) el.textContent = d.total + ' DOC' + (d.total > 1 ? 'S' : '') + ' INDEXADOS';
     }).catch(() => {});
 
-    // Auto-resize
+    // Auto-resize textarea
     input.addEventListener('input', () => {
         input.style.height = 'auto';
         input.style.height = Math.min(input.scrollHeight, 130) + 'px';
@@ -445,7 +568,7 @@
     function scrollDown() { msgs.scrollTop = msgs.scrollHeight; }
 
     function esc(s) {
-        return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n/g,'<br>');
+        return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n/g,'<br>');
     }
 
     function removeWelcome() {
@@ -479,19 +602,95 @@
 
     function hideTyping() { const t = document.getElementById('typing-msg'); if (t) t.remove(); }
 
-    function appendAssistant(text, sources) {
-        const srcs = (sources || []).map(s => {
-            const name = (s.arquivo || '').replace(/.*[\\/]/, '').replace(/\.pdf$/i, '');
-            return `<span class="src-tag">${esc(name)} · p.${s.pagina}</span>`;
+    // Map routing key → badge CSS class and label
+    const ROUTE_META = {
+        'KNOWLEDGE':       { cls: 'knowledge',      label: 'Regulatório' },
+        'DATA':            { cls: 'data',            label: 'Dados'       },
+        'ACTION':          { cls: 'action',          label: 'Ação'        },
+        'KNOWLEDGE+DATA':  { cls: 'knowledge-data',  label: 'Multi-Agente' },
+    };
+
+    const AGENT_LABEL = {
+        'knowledge': 'knowledge',
+        'data':      'data',
+        'action':    'action',
+    };
+
+    function buildRouteMeta(routing, agents) {
+        const rm = ROUTE_META[routing] || { cls: 'knowledge', label: routing };
+        const agentPills = (agents || []).map(a =>
+            `<span class="agent-pill">${esc(AGENT_LABEL[a] || a)}</span>`
+        ).join('');
+        return `<div class="route-meta">
+            <span class="route-badge ${rm.cls}">${esc(rm.label)}</span>
+            ${agentPills}
+        </div>`;
+    }
+
+    // Build source tags from a list of strings like "file.pdf, p. 3"
+    function buildSources(fontes) {
+        if (!fontes || fontes.length === 0) return '';
+        const tags = fontes.map(f => {
+            // Strip directory path, remove .pdf, show as-is otherwise
+            const clean = String(f).replace(/.*[\\/]/, '').replace(/\.pdf,/i, ',');
+            return `<span class="src-tag">${esc(clean)}</span>`;
         }).join('');
+        return `<div class="sources">${tags}</div>`;
+    }
+
+    // Build collapsible SQL block for DataAgent responses
+    function buildSqlBlock(dados) {
+        if (!dados || !dados.sql) return '';
+        const id = 'sql-' + Math.random().toString(36).slice(2);
+        const rowLabel = dados.total != null ? `${dados.total} linha${dados.total !== 1 ? 's' : ''}` : '';
+        return `<div class="sql-block" id="${id}">
+            <div class="sql-header" onclick="document.getElementById('${id}').classList.toggle('open')">
+                <span class="sql-label">SQL gerado</span>
+                <span class="sql-rows-badge">${esc(rowLabel)}</span>
+            </div>
+            <pre class="sql-code">${esc(dados.sql)}</pre>
+        </div>`;
+    }
+
+    // Build actions taken list for ActionAgent responses
+    function buildActions(acoes) {
+        if (!acoes || acoes.length === 0) return '';
+        const items = acoes.map(a => `<div class="action-item">${esc(a)}</div>`).join('');
+        return `<div class="actions-list">${items}</div>`;
+    }
+
+    function appendAgentResponse(data) {
+        // data is a CoordinatorResponse:
+        // { pergunta, roteamento, agentes_utilizados, resposta_final, detalhes_agentes, log_id }
+        const routing = data.roteamento || 'KNOWLEDGE';
+        const agents  = data.agentes_utilizados || [];
+        const text    = data.resposta_final || '';
+        const details = data.detalhes_agentes || [];
+
+        // Collect sources, SQL, and actions from agent details
+        let allFontes = [];
+        let sqlBlock  = '';
+        let actionsHtml = '';
+
+        details.forEach(det => {
+            if (det.fontes && det.fontes.length) allFontes = allFontes.concat(det.fontes);
+            if (det.dados)  sqlBlock    = buildSqlBlock(det.dados);
+            if (det.acoes && det.acoes.length) actionsHtml = buildActions(det.acoes);
+        });
+
+        // Deduplicate sources
+        allFontes = [...new Set(allFontes)];
 
         const d = document.createElement('div');
         d.className = 'msg assistant';
         d.innerHTML = `
             <div class="avatar">⚖</div>
             <div class="msg-body">
+                ${buildRouteMeta(routing, agents)}
                 <div class="bubble">${esc(text)}</div>
-                ${srcs ? `<div class="sources">${srcs}</div>` : ''}
+                ${sqlBlock}
+                ${actionsHtml}
+                ${buildSources(allFontes)}
             </div>`;
         msgs.appendChild(d);
         scrollDown();
@@ -519,7 +718,7 @@
         showTyping();
 
         try {
-            const res = await fetch('/chat', {
+            const res = await fetch('/agent', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ pergunta: q })
@@ -527,7 +726,7 @@
             if (!res.ok) throw new Error('HTTP ' + res.status);
             const data = await res.json();
             hideTyping();
-            appendAssistant(data.resposta, data.fontes);
+            appendAgentResponse(data);
         } catch (err) {
             appendError('Não foi possível obter resposta. Verifique se o Ollama está em execução (ollama serve).');
         } finally {
