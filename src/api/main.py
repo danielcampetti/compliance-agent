@@ -1,15 +1,18 @@
 """FastAPI application for ComplianceAgent.
 
 Endpoints:
-- GET  /         -- Chat UI (browser interface)
-- POST /ingest   -- Index all PDFs in data/raw/
-- POST /chat     -- Answer a regulatory question with source citations
-- GET  /documents -- List all indexed documents
+- GET  /           -- Chat UI (browser interface)
+- POST /ingest     -- Index all PDFs in data/raw/
+- POST /chat       -- Answer a regulatory question with source citations
+- GET  /documents  -- List all indexed documents
+- POST /diagnostic -- Raw RAG inspection without calling LLM
+- POST /evaluate   -- Grade a RAG response using Claude as judge
+- POST /test-pipeline -- Compare Ollama vs Claude on the same question
 """
 from __future__ import annotations
 
 from pathlib import Path
-from typing import List, Union
+from typing import List, Optional, Union
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
@@ -22,9 +25,14 @@ from src.ingestion.chunker import chunk_pages
 from src.ingestion.embedder import _get_client as _get_chroma_client
 from src.ingestion.embedder import index_chunks, list_indexed_documents
 from src.ingestion.pdf_loader import load_all_pdfs
-from src.llm.ollama_client import generate
+from src.llm import ollama_client, claude_client
 from src.retrieval.prompt_builder import build_prompt
 from src.retrieval.query_engine import retrieve
+from src.agents.coordinator import CoordinatorAgent, CoordinatorResponse
+from src.database.connection import get_db
+from src.database.seed import init_db
+from src.api.diagnostic import router as diagnostic_router
+from src.api.evaluate import router as evaluate_router
 
 app = FastAPI(
     title="ComplianceAgent API",
@@ -32,11 +40,15 @@ app = FastAPI(
     version="1.0.0",
 )
 
+app.include_router(diagnostic_router)
+app.include_router(evaluate_router)
+
 
 # -- Request / Response models -----------------------------------------------
 
 class ChatRequest(BaseModel):
     pergunta: str
+    provider: Optional[str] = None  # "ollama" or "claude"; falls back to settings.llm_provider
 
 
 class FonteSchema(BaseModel):
@@ -48,6 +60,10 @@ class FonteSchema(BaseModel):
 class ChatResponse(BaseModel):
     resposta: str
     fontes: List[FonteSchema]
+
+
+class AgentRequest(BaseModel):
+    pergunta: str
 
 
 # -- Endpoints ----------------------------------------------------------------
@@ -109,7 +125,11 @@ async def chat(request: ChatRequest) -> ChatResponse:
         )
 
     prompt = build_prompt(request.pergunta, chunks)
-    resposta = await generate(prompt)
+    provider = (request.provider or settings.llm_provider).lower()
+    if provider == "claude":
+        resposta = await claude_client.generate(prompt)
+    else:
+        resposta = await ollama_client.generate(prompt)
 
     fontes = [
         FonteSchema(
@@ -133,3 +153,100 @@ async def list_documents() -> dict:
     client = _get_chroma_client()
     docs = list_indexed_documents(client)
     return {"documentos": docs, "total": len(docs)}
+
+
+@app.post("/agent", response_model=CoordinatorResponse)
+async def agent_endpoint(request: AgentRequest) -> CoordinatorResponse:
+    """Route a question to the appropriate specialized agent(s).
+
+    Supports regulatory questions (Knowledge), data queries (Data),
+    compliance actions (Action), and combined queries (Knowledge+Data).
+    """
+    coordinator = CoordinatorAgent()
+    return await coordinator.process(request.pergunta)
+
+
+@app.get("/alerts")
+async def list_alerts(
+    status: Optional[str] = None,
+    severity: Optional[str] = None,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+) -> dict:
+    """List compliance alerts with optional filters."""
+    init_db()
+    conditions: list[str] = []
+    params: list = []
+
+    if status:
+        conditions.append("status = ?")
+        params.append(status)
+    if severity:
+        conditions.append("severity = ?")
+        params.append(severity)
+    if date_from:
+        conditions.append("created_at >= ?")
+        params.append(date_from)
+    if date_to:
+        conditions.append("created_at <= ?")
+        params.append(date_to)
+
+    where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
+    with get_db() as conn:
+        rows = conn.execute(
+            f"SELECT * FROM alerts {where} ORDER BY created_at DESC", params
+        ).fetchall()
+
+    return {
+        "alertas": [dict(r) for r in rows],
+        "total": len(rows),
+    }
+
+
+@app.get("/transactions")
+async def list_transactions(
+    transaction_type: Optional[str] = None,
+    amount_min: Optional[float] = None,
+    amount_max: Optional[float] = None,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    reported_to_coaf: Optional[bool] = None,
+    pep_flag: Optional[bool] = None,
+) -> dict:
+    """List transactions with optional filters."""
+    init_db()
+    conditions: list[str] = []
+    params: list = []
+
+    if transaction_type:
+        conditions.append("transaction_type = ?")
+        params.append(transaction_type)
+    if amount_min is not None:
+        conditions.append("amount >= ?")
+        params.append(amount_min)
+    if amount_max is not None:
+        conditions.append("amount <= ?")
+        params.append(amount_max)
+    if date_from:
+        conditions.append("date >= ?")
+        params.append(date_from)
+    if date_to:
+        conditions.append("date <= ?")
+        params.append(date_to)
+    if reported_to_coaf is not None:
+        conditions.append("reported_to_coaf = ?")
+        params.append(1 if reported_to_coaf else 0)
+    if pep_flag is not None:
+        conditions.append("pep_flag = ?")
+        params.append(1 if pep_flag else 0)
+
+    where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
+    with get_db() as conn:
+        rows = conn.execute(
+            f"SELECT * FROM transactions {where} ORDER BY date DESC", params
+        ).fetchall()
+
+    return {
+        "transacoes": [dict(r) for r in rows],
+        "total": len(rows),
+    }
