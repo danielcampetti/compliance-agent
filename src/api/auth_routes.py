@@ -1,7 +1,9 @@
 """Authentication endpoints: login, me, register, logout."""
 from __future__ import annotations
 
+import sqlite3
 from datetime import datetime, timezone
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.security import OAuth2PasswordRequestForm
@@ -21,7 +23,7 @@ class RegisterRequest(BaseModel):
     username: str
     password: str
     full_name: str
-    role: str = "analyst"
+    role: Literal["analyst", "manager"] = "analyst"
 
 
 @auth_router.post("/login")
@@ -71,7 +73,7 @@ async def register(
                 (body.username, hash_password(body.password), body.full_name, body.role, now),
             )
         return {"ok": True}
-    except Exception:
+    except sqlite3.IntegrityError:
         raise HTTPException(status_code=409, detail="Nome de usuário já existe")
 
 
