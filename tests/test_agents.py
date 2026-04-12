@@ -49,3 +49,71 @@ class TestKnowledgeAgentAnswer:
 
         assert response.confidence == 0.0
         assert "Nenhum" in response.answer
+
+
+# ── DataAgent ────────────────────────────────────────────────────────────────
+
+from src.agents.data_agent import DataAgent, _extract_sql, _SELECT_ONLY_RE
+import re
+
+
+class TestDataAgentHelpers:
+    def test_extract_sql_strips_markdown(self):
+        raw = "```sql\nSELECT * FROM transactions\n```"
+        assert _extract_sql(raw) == "SELECT * FROM transactions"
+
+    def test_extract_sql_plain(self):
+        raw = "SELECT COUNT(*) FROM alerts"
+        assert _extract_sql(raw) == "SELECT COUNT(*) FROM alerts"
+
+    def test_select_only_regex_blocks_delete(self):
+        assert not _SELECT_ONLY_RE.match("DELETE FROM transactions")
+
+    def test_select_only_regex_allows_select(self):
+        assert _SELECT_ONLY_RE.match("SELECT * FROM transactions")
+
+
+class TestDataAgentCanHandle:
+    def test_high_for_data_question(self):
+        agent = DataAgent()
+        score = agent.can_handle("Quantas transações em espécie não foram reportadas ao COAF?")
+        assert score >= 0.4
+
+    def test_low_for_regulatory_question(self):
+        agent = DataAgent()
+        score = agent.can_handle("O que diz o artigo 49 da Circular 3.978?")
+        assert score < 0.3
+
+
+class TestDataAgentAnswer:
+    @pytest.mark.asyncio
+    async def test_returns_agent_response_with_data(self, tmp_path, monkeypatch):
+        import src.database.connection as conn_mod
+        monkeypatch.setattr(conn_mod.settings, "db_path", str(tmp_path / "test.db"))
+
+        with patch("src.agents.data_agent.ollama_client.generate",
+                   new_callable=AsyncMock) as mock_gen:
+            mock_gen.side_effect = [
+                "SELECT COUNT(*) FROM transactions",
+                "Existem 50 transações no total.",
+            ]
+            agent = DataAgent()
+            response = await agent.answer("Quantas transações temos?")
+
+        assert isinstance(response, AgentResponse)
+        assert response.agent_name == "data"
+        assert response.data is not None
+        assert "sql" in response.data
+
+    @pytest.mark.asyncio
+    async def test_blocks_non_select_sql(self, tmp_path, monkeypatch):
+        import src.database.connection as conn_mod
+        monkeypatch.setattr(conn_mod.settings, "db_path", str(tmp_path / "test.db"))
+
+        with patch("src.agents.data_agent.ollama_client.generate",
+                   new_callable=AsyncMock, return_value="DELETE FROM transactions"):
+            agent = DataAgent()
+            response = await agent.answer("Apague tudo")
+
+        assert response.confidence == 0.0
+        assert "segura" in response.answer
