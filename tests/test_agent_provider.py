@@ -35,3 +35,20 @@ async def test_knowledge_agent_default_provider_is_ollama():
         agent = KnowledgeAgent()
         await agent.answer("Qual o prazo?")
     mock_gen.assert_awaited_once_with("prompt", provider="ollama")
+
+
+@pytest.mark.asyncio
+async def test_data_agent_passes_provider_to_router():
+    with patch("src.agents.data_agent.init_db"), \
+         patch("src.agents.data_agent.llm_router.generate", new_callable=AsyncMock, side_effect=["SELECT 1", "interpretação"]) as mock_gen, \
+         patch("src.agents.data_agent._execute_sql", return_value=([(1,)], ["count"])):
+        import importlib
+        import src.agents.data_agent as _m
+        importlib.reload(_m)
+        agent = _m.DataAgent()
+        resp = await agent.answer("Quantas transações?", provider="claude")
+    assert mock_gen.await_count == 2
+    for call in mock_gen.await_args_list:
+        args = call.args
+        kwargs = call.kwargs
+        assert kwargs.get("provider") == "claude" or (len(args) > 1 and args[1] == "claude")

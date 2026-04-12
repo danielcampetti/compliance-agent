@@ -91,7 +91,7 @@ class TestDataAgentAnswer:
         import src.database.connection as conn_mod
         monkeypatch.setattr(conn_mod.settings, "db_path", str(tmp_path / "test.db"))
 
-        with patch("src.agents.data_agent.ollama_client.generate",
+        with patch("src.agents.data_agent.llm_router.generate",
                    new_callable=AsyncMock) as mock_gen:
             mock_gen.side_effect = [
                 "SELECT COUNT(*) FROM transactions",
@@ -110,7 +110,7 @@ class TestDataAgentAnswer:
         import src.database.connection as conn_mod
         monkeypatch.setattr(conn_mod.settings, "db_path", str(tmp_path / "test.db"))
 
-        with patch("src.agents.data_agent.ollama_client.generate",
+        with patch("src.agents.data_agent.llm_router.generate",
                    new_callable=AsyncMock, return_value="DELETE FROM transactions"):
             agent = DataAgent()
             response = await agent.answer("Apague tudo")

@@ -7,7 +7,7 @@ import sqlite3
 from src.agents.base import AgentResponse
 from src.database.connection import get_db
 from src.database.seed import init_db
-from src.llm import ollama_client
+from src.llm import llm_router
 
 _DATA_KEYWORDS = (
     "transação", "transações", "operação", "operações", "cliente",
@@ -75,14 +75,24 @@ class DataAgent:
         hits = sum(1 for kw in _DATA_KEYWORDS if kw in q)
         return min(hits * 0.2, 1.0)
 
-    async def answer(self, question: str, extra_context: str = "") -> AgentResponse:
+    async def answer(self, question: str, extra_context: str = "", provider: str = "ollama") -> AgentResponse:
+        """Query the compliance database and interpret results.
+
+        Args:
+            question: Natural language question in Portuguese.
+            extra_context: Optional regulatory context from the KnowledgeAgent.
+            provider: LLM backend — "ollama" (default) or "claude".
+
+        Returns:
+            AgentResponse with SQL, results, and natural language interpretation.
+        """
         init_db()
 
         sql_prompt = _SQL_GENERATION_PROMPT.format(
             schema=_SCHEMA,
             question=question + ("\n\nContexto adicional:\n" + extra_context if extra_context else ""),
         )
-        raw_sql = await ollama_client.generate(sql_prompt)
+        raw_sql = await llm_router.generate(sql_prompt, provider=provider)
         sql = _extract_sql(raw_sql)
 
         if not _SELECT_ONLY_RE.match(sql):
@@ -105,7 +115,7 @@ class DataAgent:
         interp_prompt = _INTERPRETATION_PROMPT.format(
             question=question, sql=sql, results=results_text
         )
-        interpretation = await ollama_client.generate(interp_prompt)
+        interpretation = await llm_router.generate(interp_prompt, provider=provider)
 
         return AgentResponse(
             agent_name=self.name,
