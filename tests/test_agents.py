@@ -117,3 +117,59 @@ class TestDataAgentAnswer:
 
         assert response.confidence == 0.0
         assert "segura" in response.answer
+
+# ── ActionAgent ──────────────────────────────────────────────────────────────
+
+from src.agents.action_agent import ActionAgent
+
+
+class TestActionAgentCanHandle:
+    def test_high_for_report_request(self):
+        agent = ActionAgent()
+        score = agent.can_handle("Gere um relatório de alertas abertos")
+        assert score >= 0.5
+
+    def test_low_for_regulatory_question(self):
+        agent = ActionAgent()
+        score = agent.can_handle("O que diz o artigo 49 da Circular 3.978?")
+        assert score == 0.0
+
+
+class TestActionAgentAnswer:
+    @pytest.fixture
+    def db_tmp(self, tmp_path, monkeypatch):
+        import src.database.connection as conn_mod
+        monkeypatch.setattr(conn_mod.settings, "db_path", str(tmp_path / "test.db"))
+
+    @pytest.mark.asyncio
+    async def test_report_open_alerts(self, db_tmp):
+        agent = ActionAgent()
+        response = await agent.answer("Gere um relatório de alertas abertos")
+        assert response.agent_name == "action"
+        assert "Relatório" in response.answer or "Não há" in response.answer
+        assert len(response.actions_taken) == 1
+
+    @pytest.mark.asyncio
+    async def test_create_alert(self, db_tmp):
+        agent = ActionAgent()
+        response = await agent.answer("Crie um alerta para a transação 1")
+        assert "criado" in response.answer.lower()
+        assert response.data["alert_id"] is not None
+
+    @pytest.mark.asyncio
+    async def test_update_alert_status(self, db_tmp):
+        agent = ActionAgent()
+        # Create an alert first
+        await agent.answer("Crie um alerta para a transação 1")
+        # Get the alert ID from DB
+        import src.database.connection as conn_mod
+        with conn_mod.get_db() as conn:
+            alert_id = conn.execute("SELECT id FROM alerts ORDER BY id DESC LIMIT 1").fetchone()[0]
+        response = await agent.answer(f"Resolver alerta #{alert_id}")
+        assert "resolved" in response.answer.lower() or str(alert_id) in response.answer
+
+    @pytest.mark.asyncio
+    async def test_unrecognized_action(self, db_tmp):
+        agent = ActionAgent()
+        response = await agent.answer("Faça algo completamente novo")
+        assert response.confidence == 0.0
