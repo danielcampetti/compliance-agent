@@ -188,7 +188,9 @@ class TestConversationAPI:
     def test_rename_conversation(self, client):
         h = {"Authorization": f"Bearer {self._token()}"}
         conv = client.post("/conversations", json={}, headers=h).json()
-        client.patch(f"/conversations/{conv['id']}/title", json={"title": "Novo nome"}, headers=h)
+        res = client.patch(f"/conversations/{conv['id']}/title", json={"title": "Novo nome"}, headers=h)
+        assert res.status_code == 200
+        assert res.json() == {"ok": True}
         listing = client.get("/conversations", headers=h).json()["conversations"]
         assert listing[0]["title"] == "Novo nome"
 

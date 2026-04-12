@@ -31,11 +31,11 @@ async def list_conversations(
 
 @conversation_router.post("", status_code=201)
 async def create_conversation(
-    body: CreateConversationRequest = CreateConversationRequest(),
+    body: Optional[CreateConversationRequest] = None,
     current_user: TokenUser = Depends(get_current_user),
 ) -> dict:
     """Create a new conversation. Returns new conversation dict."""
-    title = body.title or "Nova conversa"
+    title = (body.title if body and body.title else None) or "Nova conversa"
     return _svc.create(current_user.user_id, title)
 
 
@@ -70,7 +70,6 @@ async def rename_conversation(
     current_user: TokenUser = Depends(get_current_user),
 ) -> dict:
     """Rename a conversation. 404 if not found or not owned by current user."""
-    if not _svc.get_by_id(conv_id, current_user.user_id):
+    if not _svc.update_title(conv_id, current_user.user_id, body.title):
         raise HTTPException(status_code=404, detail="Conversa não encontrada")
-    _svc.update_title(conv_id, body.title)
     return {"ok": True}

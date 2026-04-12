@@ -106,13 +106,14 @@ class ConversationService:
             )
         return msg_id
 
-    def update_title(self, conversation_id: int, title: str) -> None:
-        """Update conversation title."""
+    def update_title(self, conversation_id: int, user_id: int, title: str) -> bool:
+        """Update conversation title. Returns True if updated, False if not found/not owned."""
         with get_db() as conn:
-            conn.execute(
-                "UPDATE conversations SET title = ? WHERE id = ?",
-                (title, conversation_id),
+            result = conn.execute(
+                "UPDATE conversations SET title = ? WHERE id = ? AND user_id = ? AND is_active = 1",
+                (title, conversation_id, user_id),
             )
+        return result.rowcount > 0
 
     def delete(self, conversation_id: int, user_id: int) -> bool:
         """Soft-delete a conversation. Returns True if deleted, False if not found/unauthorised."""
