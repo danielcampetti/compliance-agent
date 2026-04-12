@@ -202,3 +202,91 @@ class TestConversationAPI:
 
     def test_unauthenticated_returns_401_or_403(self, client):
         assert client.get("/conversations").status_code in (401, 403)
+
+
+class TestAgentMemoryIntegration:
+
+    @pytest.fixture
+    def client_with_mock(self, tmp_db):
+        from unittest.mock import AsyncMock, patch
+        from fastapi.testclient import TestClient
+        from src.api.main import app
+        from src.agents.coordinator import CoordinatorResponse
+
+        mock_response = CoordinatorResponse(
+            pergunta="test", roteamento="KNOWLEDGE", agentes_utilizados=["knowledge"],
+            resposta_final="Resposta teste", detalhes_agentes=[],
+            log_id=1, provider_utilizado="ollama",
+            pii_detected=False, data_classification="public", session_id="abc123",
+        )
+        with patch("src.api.main.CoordinatorAgent") as MockCoord:
+            MockCoord.return_value.process = AsyncMock(return_value=mock_response)
+            yield TestClient(app)
+
+    def _token(self, role: str = "analyst") -> str:
+        from src.api.auth import create_access_token
+        uid, uname = (1, "admin") if role == "manager" else (2, "analista")
+        return create_access_token(uid, uname, role)
+
+    def test_agent_without_conversation_id_still_works(self, client_with_mock):
+        h = {"Authorization": f"Bearer {self._token()}"}
+        res = client_with_mock.post("/agent", json={"pergunta": "Qual o prazo?"}, headers=h)
+        assert res.status_code == 200
+
+    def test_agent_with_conversation_id_saves_both_messages(self, tmp_db):
+        from unittest.mock import AsyncMock, patch
+        from fastapi.testclient import TestClient
+        from src.api.main import app
+        from src.api.auth import create_access_token
+        from src.agents.coordinator import CoordinatorResponse
+        from src.services.conversation import ConversationService
+
+        svc = ConversationService()
+        conv = svc.create(user_id=2, title="Test")
+
+        mock_response = CoordinatorResponse(
+            pergunta="Qual o prazo?", roteamento="KNOWLEDGE",
+            agentes_utilizados=["knowledge"], resposta_final="O prazo é 180 dias.",
+            detalhes_agentes=[], log_id=1, provider_utilizado="ollama",
+            pii_detected=False, data_classification="public", session_id="abc",
+        )
+        with patch("src.api.main.CoordinatorAgent") as MockCoord:
+            MockCoord.return_value.process = AsyncMock(return_value=mock_response)
+            c = TestClient(app)
+            token = create_access_token(2, "analista", "analyst")
+            c.post("/agent",
+                json={"pergunta": "Qual o prazo?", "conversation_id": conv["id"]},
+                headers={"Authorization": f"Bearer {token}"})
+
+        msgs = svc.get_messages(conv["id"], 2)
+        assert len(msgs) == 2
+        assert msgs[0]["role"] == "user" and msgs[0]["content"] == "Qual o prazo?"
+        assert msgs[1]["role"] == "assistant" and msgs[1]["content"] == "O prazo é 180 dias."
+
+    def test_first_message_auto_titles_conversation(self, tmp_db):
+        from unittest.mock import AsyncMock, patch
+        from fastapi.testclient import TestClient
+        from src.api.main import app
+        from src.api.auth import create_access_token
+        from src.agents.coordinator import CoordinatorResponse
+        from src.services.conversation import ConversationService
+
+        svc = ConversationService()
+        conv = svc.create(user_id=2, title="Nova conversa")
+
+        mock_response = CoordinatorResponse(
+            pergunta="Quais são os requisitos?", roteamento="KNOWLEDGE",
+            agentes_utilizados=["knowledge"], resposta_final="Resposta.",
+            detalhes_agentes=[], log_id=1, provider_utilizado="ollama",
+            pii_detected=False, data_classification="public", session_id="x",
+        )
+        with patch("src.api.main.CoordinatorAgent") as MockCoord:
+            MockCoord.return_value.process = AsyncMock(return_value=mock_response)
+            c = TestClient(app)
+            token = create_access_token(2, "analista", "analyst")
+            c.post("/agent",
+                json={"pergunta": "Quais são os requisitos?", "conversation_id": conv["id"]},
+                headers={"Authorization": f"Bearer {token}"})
+
+        listing = svc.list_by_user(2)
+        assert listing[0]["title"] == "Quais são os requisitos?"

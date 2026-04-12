@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Optional
 
 from pydantic import BaseModel
 
@@ -42,6 +43,9 @@ class CoordinatorResponse(BaseModel):
     detalhes_agentes: list[dict]
     log_id: int
     provider_utilizado: str
+    pii_detected: bool = False
+    data_classification: str = "public"
+    session_id: str = ""
 
 
 class CoordinatorAgent:
@@ -52,7 +56,14 @@ class CoordinatorAgent:
         self.data_agent = DataAgent()
         self.action_agent = ActionAgent()
 
-    async def process(self, question: str, provider: str = "ollama") -> CoordinatorResponse:
+    async def process(
+        self,
+        question: str,
+        provider: str = "ollama",
+        user_id: Optional[int] = None,
+        username: Optional[str] = None,
+        conversation_history: Optional[list[dict]] = None,
+    ) -> CoordinatorResponse:
         """Classify and route a question to the appropriate agent(s).
 
         Args:

@@ -35,6 +35,7 @@ from src.retrieval.query_engine import retrieve
 from src.agents.coordinator import CoordinatorAgent, CoordinatorResponse
 from src.database.connection import get_db
 from src.database.seed import init_db
+from src.services.conversation import ConversationService
 from src.api.diagnostic import router as diagnostic_router
 from src.api.evaluate import router as evaluate_router
 from src.api.conversation_routes import conversation_router
@@ -72,6 +73,7 @@ class ChatResponse(BaseModel):
 class AgentRequest(BaseModel):
     pergunta: str
     provider: Optional[str] = None  # "ollama" or "claude"; falls back to settings.llm_provider
+    conversation_id: Optional[int] = None  # NEW — enables persistent memory
 
 
 # -- Endpoints ----------------------------------------------------------------
@@ -179,20 +181,59 @@ async def list_documents(_: TokenUser = Depends(require_role("analyst", "manager
 
 
 @app.post("/agent", response_model=CoordinatorResponse)
-async def agent_endpoint(request: AgentRequest) -> CoordinatorResponse:
+async def agent_endpoint(
+    request: AgentRequest,
+    current_user: TokenUser = Depends(require_role("analyst", "manager")),
+) -> CoordinatorResponse:
     """Route a question to the appropriate specialized agent(s).
 
-    Supports regulatory questions (Knowledge), data queries (Data),
-    compliance actions (Action), and combined queries (Knowledge+Data).
+    When conversation_id is provided, saves both user question and agent response
+    to the messages table and passes prior context to the coordinator.
     """
     provider = (request.provider or settings.llm_provider).lower()
     coordinator = CoordinatorAgent()
+    svc = ConversationService()
+
+    conversation_history = None
+    if request.conversation_id is not None:
+        # Snapshot history BEFORE saving current message (these are the prior exchanges)
+        conversation_history = svc.get_context_messages(
+            request.conversation_id, max_messages=10
+        )
+        is_first_message = len(conversation_history) == 0
+        svc.add_message(request.conversation_id, "user", request.pergunta)
+        if is_first_message:
+            svc.update_title(
+                request.conversation_id,
+                current_user.user_id,
+                ConversationService.auto_title(request.pergunta),
+            )
+
     try:
-        return await coordinator.process(request.pergunta, provider=provider)
+        response = await coordinator.process(
+            request.pergunta,
+            provider=provider,
+            user_id=current_user.user_id,
+            username=current_user.username,
+            conversation_history=conversation_history,
+        )
     except ValueError as exc:
         if "ANTHROPIC_API_KEY" in str(exc):
             raise HTTPException(status_code=503, detail=str(exc))
         raise
+
+    if request.conversation_id is not None:
+        svc.add_message(
+            request.conversation_id,
+            "assistant",
+            response.resposta_final,
+            agent_used=",".join(response.agentes_utilizados),
+            provider=response.provider_utilizado,
+            data_classification=response.data_classification,
+            pii_detected=response.pii_detected,
+        )
+
+    return response
 
 
 @app.get("/alerts")

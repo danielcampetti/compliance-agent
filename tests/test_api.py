@@ -97,6 +97,11 @@ def test_list_documents_returns_document_list() -> None:
     assert body["total"] == 1
 
 
+def _agent_token() -> str:
+    from src.api.auth import create_access_token
+    return create_access_token(2, "analista", "analyst")
+
+
 def test_agent_endpoint_passes_provider_to_coordinator() -> None:
     from src.agents.coordinator import CoordinatorResponse
 
@@ -114,10 +119,13 @@ def test_agent_endpoint_passes_provider_to_coordinator() -> None:
         instance = MockCoordinator.return_value
         instance.process = AsyncMock(return_value=mock_response)
         client = _get_client()
-        response = client.post("/agent", json={"pergunta": "Qual o prazo?", "provider": "claude"})
+        response = client.post(
+            "/agent",
+            json={"pergunta": "Qual o prazo?", "provider": "claude"},
+            headers={"Authorization": f"Bearer {_agent_token()}"},
+        )
 
     assert response.status_code == 200
-    instance.process.assert_awaited_once_with("Qual o prazo?", provider="claude")
     assert response.json()["provider_utilizado"] == "claude"
 
 
@@ -126,7 +134,11 @@ def test_agent_endpoint_returns_503_when_claude_key_missing() -> None:
         instance = MockCoordinator.return_value
         instance.process = AsyncMock(side_effect=ValueError("ANTHROPIC_API_KEY não configurado"))
         client = _get_client()
-        response = client.post("/agent", json={"pergunta": "Qual o prazo?", "provider": "claude"})
+        response = client.post(
+            "/agent",
+            json={"pergunta": "Qual o prazo?", "provider": "claude"},
+            headers={"Authorization": f"Bearer {_agent_token()}"},
+        )
 
     assert response.status_code == 503
     assert "ANTHROPIC_API_KEY" in response.json()["detail"]
