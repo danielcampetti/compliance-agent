@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from src.agents.base import AgentResponse
-from src.llm import ollama_client
+from src.llm import llm_router
 from src.retrieval.prompt_builder import build_prompt
 from src.retrieval.query_engine import retrieve
 
@@ -25,11 +25,12 @@ class KnowledgeAgent:
         hits = sum(1 for kw in _KNOWLEDGE_KEYWORDS if kw in q)
         return min(hits * 0.2, 1.0)
 
-    async def answer(self, question: str) -> AgentResponse:
-        """Retrieve relevant chunks and generate an answer using Ollama.
+    async def answer(self, question: str, provider: str = "ollama") -> AgentResponse:
+        """Retrieve relevant chunks and generate an answer.
 
         Args:
             question: Natural language question in Portuguese.
+            provider: LLM backend — "ollama" (default) or "claude".
 
         Returns:
             AgentResponse with the answer text, sources, and confidence score.
@@ -44,7 +45,7 @@ class KnowledgeAgent:
             )
 
         prompt = build_prompt(question, chunks)
-        answer_text = await ollama_client.generate(prompt)
+        answer_text = await llm_router.generate(prompt, provider=provider)
 
         sources = list({
             f"{c.metadata.get('source', 'Desconhecido')}, p. {c.metadata.get('page', '?')}"

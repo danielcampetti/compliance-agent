@@ -31,7 +31,7 @@ class TestKnowledgeAgentAnswer:
                            metadata={"source": "res_5274.pdf", "page": 3})
         ]
         with patch("src.agents.knowledge_agent.retrieve", return_value=mock_chunks), \
-             patch("src.agents.knowledge_agent.ollama_client.generate",
+             patch("src.agents.knowledge_agent.llm_router.generate",
                    new_callable=AsyncMock, return_value="O prazo é 1º de março de 2026."):
             agent = KnowledgeAgent()
             response = await agent.answer("Qual é o prazo da Resolução 5.274?")
