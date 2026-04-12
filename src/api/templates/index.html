@@ -765,6 +765,7 @@
     const btn    = document.getElementById('send');
     let loading  = false;
     let currentProvider = 'ollama';
+    let currentConversationId = null;
 
     function setProvider(p) {
         currentProvider = p;
@@ -934,9 +935,175 @@
         scrollDown();
     }
 
+    async function loadConversations() {
+        try {
+            const res = await fetch('/conversations', {headers: {'Authorization': 'Bearer ' + token}});
+            if (!res.ok) return;
+            renderConversationList((await res.json()).conversations);
+        } catch (e) {}
+    }
+
+    function renderConversationList(conversations) {
+        const container = document.getElementById('conversations-list');
+        const emptyMsg  = document.getElementById('sidebar-empty');
+
+        if (!conversations || conversations.length === 0) {
+            container.innerHTML = '';
+            emptyMsg && container.appendChild(emptyMsg);
+            if (emptyMsg) emptyMsg.style.display = 'block';
+            return;
+        }
+        if (emptyMsg) emptyMsg.style.display = 'none';
+
+        const todayStr     = new Date().toDateString();
+        const yesterdayStr = new Date(Date.now() - 86400000).toDateString();
+        const weekAgo      = new Date(Date.now() - 7 * 86400000);
+        const groups = {'Hoje': [], 'Ontem': [], 'Esta semana': [], 'Anteriores': []};
+
+        conversations.forEach(conv => {
+            const d = new Date(conv.updated_at);
+            const ds = d.toDateString();
+            if (ds === todayStr)           groups['Hoje'].push(conv);
+            else if (ds === yesterdayStr)  groups['Ontem'].push(conv);
+            else if (d >= weekAgo)         groups['Esta semana'].push(conv);
+            else                           groups['Anteriores'].push(conv);
+        });
+
+        container.innerHTML = '';
+        for (const [label, convs] of Object.entries(groups)) {
+            if (!convs.length) continue;
+            const lbl = document.createElement('div');
+            lbl.className = 'conv-group-label';
+            lbl.textContent = label;
+            container.appendChild(lbl);
+
+            convs.forEach(conv => {
+                const item = document.createElement('div');
+                item.className = 'conv-item' + (conv.id === currentConversationId ? ' active' : '');
+                item.dataset.convId = conv.id;
+
+                const d = new Date(conv.updated_at);
+                const timeStr = d.toDateString() === todayStr
+                    ? d.toLocaleTimeString('pt-BR', {hour: '2-digit', minute: '2-digit'})
+                    : d.toLocaleDateString('pt-BR', {day: '2-digit', month: '2-digit'});
+
+                item.innerHTML = `
+                <div class="conv-item-body">
+                    <div class="conv-title">${esc(conv.title.slice(0, 30))}</div>
+                    <div class="conv-meta">${esc(timeStr)}</div>
+                </div>
+                <button class="conv-delete-btn"
+                    onclick="deleteConversation(event,${conv.id})" title="Apagar">🗑</button>`;
+                item.addEventListener('click', () => loadConversation(conv.id));
+                container.appendChild(item);
+            });
+        }
+    }
+
+    async function loadConversation(convId) {
+        try {
+            const res = await fetch(`/conversations/${convId}`, {
+                headers: {'Authorization': 'Bearer ' + token}
+            });
+            if (!res.ok) return;
+            const {messages} = await res.json();
+
+            currentConversationId = convId;
+            msgs.innerHTML = '';
+
+            messages.forEach(msg => {
+                if (msg.role === 'user') {
+                    appendUser(msg.content);
+                } else {
+                    // Reconstruct enough of CoordinatorResponse for the renderer
+                    const agentList = msg.agent_used ? msg.agent_used.split(',') : [];
+                    const routing = agentList.length > 1
+                        ? 'KNOWLEDGE+DATA'
+                        : (agentList[0] || 'knowledge').toUpperCase();
+                    appendAgentResponse({
+                        roteamento: routing,
+                        agentes_utilizados: agentList,
+                        resposta_final: msg.content,
+                        detalhes_agentes: [],
+                        pii_detected: !!msg.pii_detected,
+                        data_classification: msg.data_classification || 'public',
+                    });
+                }
+            });
+
+            document.querySelectorAll('.conv-item').forEach(el =>
+                el.classList.toggle('active', parseInt(el.dataset.convId) === convId));
+
+            scrollDown();
+            if (window.innerWidth <= 768)
+                document.getElementById('sidebar').classList.remove('mobile-open');
+        } catch (e) {}
+    }
+
+    async function startNewConversation() {
+        try {
+            const res = await fetch('/conversations', {
+                method: 'POST',
+                headers: {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'},
+                body: JSON.stringify({}),
+            });
+            if (!res.ok) return;
+            const conv = await res.json();
+            currentConversationId = conv.id;
+            msgs.innerHTML = '';
+            // Restore welcome screen
+            const w = document.createElement('div');
+            w.id = 'welcome';
+            w.innerHTML = `
+                <div class="welcome-glyph">⚖️</div>
+                <h2>Consultoria Regulatória</h2>
+                <p>Faça perguntas sobre regulamentação do Banco Central, CVM e CMN. As respostas são fundamentadas exclusivamente nos documentos indexados.</p>
+                <div class="chips">
+                    <button class="chip" onclick="useChip(this)">O que diz a Circular 3.978?</button>
+                    <button class="chip" onclick="useChip(this)">Quais as obrigações de PLD/FT?</button>
+                    <button class="chip" onclick="useChip(this)">Quantas transações não foram reportadas ao COAF?</button>
+                    <button class="chip" onclick="useChip(this)">Gere um relatório de alertas abertos</button>
+                </div>`;
+            msgs.appendChild(w);
+            await loadConversations();
+        } catch (e) {}
+    }
+
+    async function deleteConversation(event, convId) {
+        event.stopPropagation();
+        if (!confirm('Apagar esta conversa?')) return;
+        try {
+            await fetch(`/conversations/${convId}`, {
+                method: 'DELETE',
+                headers: {'Authorization': 'Bearer ' + token},
+            });
+            if (convId === currentConversationId) {
+                await startNewConversation();
+            } else {
+                await loadConversations();
+            }
+        } catch (e) {}
+    }
+
+    function toggleSidebar() {
+        document.getElementById('sidebar').classList.toggle('mobile-open');
+    }
+
     async function send() {
         const q = input.value.trim();
         if (!q || loading) return;
+
+        // Auto-create conversation on first send
+        if (!currentConversationId) {
+            try {
+                const res = await fetch('/conversations', {
+                    method: 'POST',
+                    headers: {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'},
+                    body: JSON.stringify({}),
+                });
+                if (res.ok) currentConversationId = (await res.json()).id;
+            } catch (e) {}
+        }
 
         loading = true;
         btn.disabled = true;
@@ -950,12 +1117,16 @@
             const res = await fetch('/agent', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token},
-                body: JSON.stringify({ pergunta: q, provider: currentProvider })
+                body: JSON.stringify({
+                    pergunta: q,
+                    provider: currentProvider,
+                    conversation_id: currentConversationId,
+                }),
             });
             if (!res.ok) throw new Error('HTTP ' + res.status);
-            const data = await res.json();
             hideTyping();
-            appendAgentResponse(data);
+            appendAgentResponse(await res.json());
+            loadConversations();  // refresh sidebar order + title
         } catch (err) {
             appendError(
                 currentProvider === 'claude'
@@ -968,6 +1139,10 @@
             input.focus();
         }
     }
+
+    document.addEventListener('DOMContentLoaded', () => {
+        loadConversations();
+    });
 </script>
 </body>
 </html>
