@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import unicodedata
 from datetime import datetime
 from typing import AsyncGenerator, Optional
 
@@ -21,26 +22,6 @@ _LGPD_FOOTER = (
     "\n\n---\n🔒 Esta resposta contém dados pessoais protegidos pela LGPD. "
     "Uso restrito a fins de compliance."
 )
-
-_ROUTING_PROMPT = """\
-Você é um roteador de agentes de compliance financeiro. Classifique a intenção da pergunta.
-
-Agentes disponíveis:
-- KNOWLEDGE: Perguntas sobre regulamentações, normas, resoluções, circulares, artigos, prazos legais.
-  Também inclui perguntas conversacionais/meta sobre a própria conversa (histórico, perguntas anteriores, resumos, pedidos de esclarecimento).
-  Exemplos: "O que diz o Art. 49 da Circular 3.978?", "Quais são os requisitos de cibersegurança?",
-            "qual foi a pergunta anterior?", "explique melhor", "resuma o que discutimos", "o que você disse antes?"
-- DATA: Perguntas sobre dados de transações, clientes, operações, alertas no banco de dados.
-  Exemplos: "Quantas operações acima de R$50.000 temos?", "Quais clientes são PEP?"
-- ACTION: Solicitações de ações concretas no sistema (criar, atualizar, resolver, reportar).
-  Exemplos: "Crie um alerta", "Gere um relatório de alertas abertos", "Resolver alerta #3"
-- KNOWLEDGE+DATA: Perguntas que cruzam regulamentação com dados reais.
-  Exemplos: "Verifique se estamos em conformidade com o Art. 49 sobre operações em espécie"
-
-Responda APENAS com uma das opções: KNOWLEDGE, DATA, ACTION, KNOWLEDGE+DATA
-
-Pergunta: {question}
-Classificação:"""
 
 
 class CoordinatorResponse(BaseModel):
@@ -405,7 +386,6 @@ def _is_conversational(question: str) -> bool:
     KnowledgeAgent receives the conversation_history injected into build_prompt().
     Input is accent-normalized before matching so users can omit diacritics.
     """
-    import unicodedata
     q = unicodedata.normalize("NFD", question.lower())
     q = "".join(c for c in q if unicodedata.category(c) != "Mn")  # strip combining marks
 
@@ -428,7 +408,6 @@ def _heuristic_route(question: str) -> str:
 
     Priority: ACTION > KNOWLEDGE+DATA > DATA > KNOWLEDGE (default).
     """
-    import unicodedata
     q = unicodedata.normalize("NFD", question.lower())
     q = "".join(c for c in q if unicodedata.category(c) != "Mn")
 
@@ -440,7 +419,7 @@ def _heuristic_route(question: str) -> str:
         "relatorio de alertas", "relatorio de transacoes",
         "resolver alerta", "resolver o alerta",
         "investigar", "reportar coaf",
-        "crie", "resolver", "atualizar",
+        "atualizar",
     )
     data_kws = (
         "transacao", "transacoes",
