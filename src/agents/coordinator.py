@@ -304,7 +304,8 @@ class CoordinatorAgent:
                 if sources:
                     yield f'data: {json.dumps({"type": "sources", "chunks": sources})}\n\n'
 
-                yield f'data: {json.dumps({"type": "token", "content": "**Análise Regulatória:**\n"})}\n\n'
+                _header_reg = "**Análise Regulatória:**\n"
+                yield f'data: {json.dumps({"type": "token", "content": _header_reg})}\n\n'
 
                 full_knowledge = ""
                 if prompt:
@@ -312,7 +313,8 @@ class CoordinatorAgent:
                         full_knowledge += token
                         yield f'data: {json.dumps({"type": "token", "content": token})}\n\n'
 
-                yield f'data: {json.dumps({"type": "token", "content": "\n\n**Análise de Dados:**\n"})}\n\n'
+                _header_data = "\n\n**Análise de Dados:**\n"
+                yield f'data: {json.dumps({"type": "token", "content": _header_data})}\n\n'
 
                 d_resp = await self.data_agent.answer(
                     question, extra_context=full_knowledge, provider=provider
