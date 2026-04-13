@@ -692,6 +692,21 @@
             50%       { opacity: 0; }
         }
         .streaming-text { min-height: 1.2em; }
+
+        /* ── Thinking animation ─────────────────────────── */
+        .thinking-text {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.4em;
+            font-size: 0.7rem;
+            color: var(--gold);
+            animation: thinking-pulse 1.4s ease-in-out infinite;
+            font-family: inherit;
+        }
+        @keyframes thinking-pulse {
+            0%, 100% { opacity: 0.4; }
+            50%       { opacity: 1.0; }
+        }
     </style>
 </head>
 <body>
@@ -1115,12 +1130,19 @@
             <div class="msg-body">
                 <div class="route-meta" id="stream-meta"></div>
                 <div class="bubble streaming-text" id="stream-content">
-                    <span class="streaming-cursor">▊</span>
+                    <span class="thinking-text">Analisando pergunta...</span><span class="streaming-cursor">▊</span>
                 </div>
             </div>`;
         msgs.appendChild(d);
         scrollDown();
         return d;
+    }
+
+    function clearThinkingAnimation(msgDiv) {
+        const content = msgDiv.querySelector('#stream-content');
+        if (!content) return;
+        const thinking = content.querySelector('.thinking-text');
+        if (thinking) thinking.remove();
     }
 
     function updateStreamingHeader(msgDiv, roteamento, agentes) {
@@ -1256,6 +1278,7 @@
                                 case 'metadata':
                                     metadata = event;
                                     updateStreamingHeader(msgDiv, event.roteamento, event.agentes_utilizados);
+                                    clearThinkingAnimation(msgDiv);
                                     break;
                                 case 'token':
                                     fullText += event.content;
