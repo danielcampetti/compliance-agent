@@ -88,7 +88,7 @@ class CoordinatorAgent:
         """
         init_db()
         session_id = audit.generate_session_id()
-        routing = await self._classify(question, provider=provider)
+        routing = await self._classify(question)
         details: list[dict] = []
         agents_used: list[str] = []
         model = "claude-sonnet-4-6" if provider == "claude" else "llama3:8b"
@@ -229,7 +229,7 @@ class CoordinatorAgent:
         """
         init_db()
         session_id = audit.generate_session_id()
-        routing = await self._classify(question, provider=provider)
+        routing = await self._classify(question)
         model = "claude-sonnet-4-6" if provider == "claude" else "llama3:8b"
 
         _route_agents = {
@@ -371,7 +371,7 @@ class CoordinatorAgent:
         except Exception as exc:
             yield f'data: {json.dumps({"type": "error", "message": str(exc)})}\n\n'
 
-    async def _classify(self, question: str, provider: str = "ollama") -> str:
+    async def _classify(self, question: str) -> str:
         # Short-circuit: conversational/meta questions always go to KNOWLEDGE
         if _is_conversational(question):
             return "KNOWLEDGE"
@@ -443,8 +443,8 @@ def _heuristic_route(question: str) -> str:
         "crie", "resolver", "atualizar",
     )
     data_kws = (
-        "transacao", "transacoes", "transacão", "transações",
-        "operacao", "operacoes", "operação", "operações em especie",
+        "transacao", "transacoes",
+        "operacao", "operacoes", "operacoes em especie",
         "coaf", "reportada", "nao reportada", "nao foram reportadas",
         "banco de dados",
         "quantas", "quantos",

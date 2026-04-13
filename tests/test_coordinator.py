@@ -86,6 +86,26 @@ class TestClassifyNoLlm:
         mock_router.generate.assert_not_called()
         assert result == "KNOWLEDGE"
 
+    @pytest.mark.asyncio
+    async def test_classify_action_does_not_call_llm(self):
+        from unittest.mock import patch, AsyncMock
+        with patch("src.agents.coordinator.llm_router") as mock_router:
+            mock_router.generate = AsyncMock(return_value="ACTION")
+            coordinator = CoordinatorAgent.__new__(CoordinatorAgent)
+            result = await coordinator._classify("Crie um alerta para cliente suspeito")
+        mock_router.generate.assert_not_called()
+        assert result == "ACTION"
+
+    @pytest.mark.asyncio
+    async def test_classify_knowledge_data_does_not_call_llm(self):
+        from unittest.mock import patch, AsyncMock
+        with patch("src.agents.coordinator.llm_router") as mock_router:
+            mock_router.generate = AsyncMock(return_value="KNOWLEDGE+DATA")
+            coordinator = CoordinatorAgent.__new__(CoordinatorAgent)
+            result = await coordinator._classify("Verifique o Art. 49 sobre transações em espécie")
+        mock_router.generate.assert_not_called()
+        assert result == "KNOWLEDGE+DATA"
+
 
 class TestCoordinatorProcess:
     @pytest.fixture
