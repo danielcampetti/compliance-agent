@@ -215,6 +215,45 @@ class TestStreamEndpoint:
         res = client.post("/agent/stream", json={"pergunta": "test"})
         assert res.status_code in (401, 403)
 
+    def test_stream_saves_agent_used_and_data_classification(self):
+        """svc.add_message is called with correct agent_used and data_classification."""
+        from fastapi.testclient import TestClient
+        from src.api.main import app
+
+        async def fake_stream(question, provider="ollama", user_id=None,
+                              username=None, conversation_history=None):
+            yield 'data: {"type": "metadata", "roteamento": "KNOWLEDGE", "agentes_utilizados": ["knowledge"]}\n\n'
+            yield 'data: {"type": "token", "content": "Ol\u00e1"}\n\n'
+            yield 'data: {"type": "done", "pii_detected": false, "data_classification": "public", "session_id": "abc", "full_response": "Ol\u00e1"}\n\n'
+
+        mock_conv = MagicMock()
+        mock_svc = MagicMock()
+        mock_svc.get_by_id.return_value = mock_conv
+        mock_svc.get_context_messages.return_value = []
+
+        with patch("src.api.main.CoordinatorAgent") as MockCoord, \
+             patch("src.api.main.ConversationService", return_value=mock_svc):
+            MockCoord.return_value.process_stream = fake_stream
+            client = TestClient(app)
+            token = self._make_token()
+            client.post(
+                "/agent/stream",
+                json={"pergunta": "test", "conversation_id": 1},
+                headers={"Authorization": f"Bearer {token}"},
+            )
+
+        # add_message is called twice: once for the user turn, once for the assistant.
+        # Verify the assistant call has the correct metadata fields.
+        mock_svc.add_message.assert_called_with(
+            1,
+            "assistant",
+            "Olá",
+            agent_used="knowledge",
+            provider="ollama",
+            data_classification="public",
+            pii_detected=False,
+        )
+
     def test_original_agent_endpoint_still_works(self):
         """POST /agent still returns JSON (backward compat)."""
         from fastapi.testclient import TestClient

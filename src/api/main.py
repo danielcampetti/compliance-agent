@@ -278,34 +278,39 @@ async def agent_stream_endpoint(
 
     async def event_generator():
         full_response = ""
-        try:
-            async for event in coordinator.process_stream(
-                request.pergunta,
-                provider=provider,
-                user_id=current_user.user_id,
-                username=current_user.username,
-                conversation_history=conversation_history,
-            ):
-                yield event
-                if event.startswith("data:"):
-                    try:
-                        data = json.loads(event[5:].strip())
-                        if data.get("type") == "done":
-                            full_response = data.get("full_response", "")
-                    except Exception:
-                        pass
-        except Exception as exc:
-            yield f'data: {json.dumps({"type": "error", "message": str(exc)})}\n\n'
+        agents_used: list[str] = []
+        data_classification: str = "public"
+        pii_detected: bool = False
+
+        async for event in coordinator.process_stream(
+            request.pergunta,
+            provider=provider,
+            user_id=current_user.user_id,
+            username=current_user.username,
+            conversation_history=conversation_history,
+        ):
+            yield event
+            if event.startswith("data:"):
+                try:
+                    data = json.loads(event[5:].strip())
+                    if data.get("type") == "metadata":
+                        agents_used = data.get("agentes_utilizados", [])
+                    elif data.get("type") == "done":
+                        full_response = data.get("full_response", "")
+                        data_classification = data.get("data_classification", "public")
+                        pii_detected = data.get("pii_detected", False)
+                except Exception:
+                    pass
 
         if request.conversation_id is not None and full_response:
             svc.add_message(
                 request.conversation_id,
                 "assistant",
                 full_response,
-                agent_used=None,
+                agent_used=",".join(agents_used) if agents_used else None,
                 provider=provider,
-                data_classification=None,
-                pii_detected=False,
+                data_classification=data_classification,
+                pii_detected=pii_detected,
             )
 
     return StreamingResponse(
