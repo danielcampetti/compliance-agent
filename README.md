@@ -1,6 +1,6 @@
 # ComplianceAgent
 
-![CI](https://github.com/YOUR_USER/YOUR_REPO/actions/workflows/ci.yml/badge.svg)
+![CI](https://github.com/danielcampetti/compliance-agent/actions/workflows/ci.yml/badge.svg)
 
 Sistema RAG para compliance e regulamentacao financeira brasileira.
 Ingere PDFs do Banco Central do Brasil (BCB), CVM e outros orgaos regulatorios, indexa em um banco vetorial e responde perguntas com citacoes das fontes.
