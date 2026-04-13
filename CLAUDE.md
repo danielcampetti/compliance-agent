@@ -12,124 +12,264 @@ ComplianceAgent is a multi-agent RAG-based assistant for Brazilian financial com
 |-------|-----------|
 | Language | Python 3.11+ |
 | LLM | Ollama (llama3:8b) — local, zero cost |
+| LLM (alternate) | Anthropic Claude (claude-sonnet-4-6) — via `anthropic` SDK |
 | Embeddings | sentence-transformers (all-MiniLM-L6-v2) — local |
-| Reranking | cross-encoder/ms-marco-MiniLM-L-6-v2 — local |
+| Reranking | cross-encoder/mmarco-mMiniLMv2-L12-H384-v1 — multilingual, local |
 | Vector Store | ChromaDB (file-based, persistent) |
-| Database | PostgreSQL (Phase 2+) |
+| Database | SQLite (file: `data/compliance.db`) |
 | API | FastAPI |
-| Agent Framework | LangChain / LangGraph (Phase 2+) |
-| Frontend | React (Phase 3+) |
+| Agent Framework | Custom implementation (no LangChain/LangGraph) |
+| Auth | JWT (PyJWT + bcrypt), role-based (analyst / manager) |
+| Frontend | Vanilla HTML/JS/CSS (no React framework) |
+| HTTP client | httpx (async) |
 | Containerization | Docker + Docker Compose |
-| CI/CD | GitHub Actions |
+| CI/CD | GitHub Actions (Python 3.11 + 3.13, 142 tests) |
 
 ## Project Phases
 
-### Phase 1 — Basic RAG System [Complete]
-Functional RAG pipeline: ingest BCB PDFs → vector store → answer questions with citations.
-**Status:** Complete
+### Phase 1 — Basic RAG System [COMPLETE]
+
+Functional RAG pipeline: ingest BCB PDFs → ChromaDB vector store → answer questions with citations.
+
+```
+PDF files → pdf_loader → chunker → embedder (ChromaDB)
+Question  → query_engine (top-50 vector search → cross-encoder rerank to top-20) → prompt_builder → LLM
+```
 
 Modules:
-- `src/config.py` — Central Pydantic Settings config (llm_provider, claude_model, anthropic_api_key)
-- `src/ingestion/pdf_loader.py` — PyMuPDF PDF extraction
-- `src/ingestion/chunker.py` — RecursiveCharacterTextSplitter chunking
+- `src/config.py` — Pydantic Settings: paths, models, DB, Ollama, Claude, JWT config
+- `src/ingestion/pdf_loader.py` — PyMuPDF PDF extraction → `DocumentPage` dataclasses
+- `src/ingestion/chunker.py` — RecursiveCharacterTextSplitter chunking → `TextChunk` dataclasses
 - `src/ingestion/embedder.py` — Sentence Transformers + ChromaDB indexing
-- `src/retrieval/query_engine.py` — Similarity search + cross-encoder reranking
-- `src/retrieval/prompt_builder.py` — Portuguese prompt assembly with citations
+- `src/retrieval/query_engine.py` — Similarity search (top-50) + multilingual cross-encoder reranking (top-20); small-doc bypass when ≤30 chunks
+- `src/retrieval/prompt_builder.py` — Portuguese prompt assembly with citations and 6 anti-hallucination rules
 - `src/llm/ollama_client.py` — Ollama HTTP client (async, full + streaming)
 - `src/llm/claude_client.py` — Anthropic Claude client (async, full + streaming, prompt caching)
-- `src/api/main.py` — FastAPI: GET /, POST /ingest, POST /chat, GET /documents
-- `src/api/diagnostic.py` — POST /diagnostic: raw RAG inspection without LLM
-- `src/api/evaluate.py` — POST /evaluate (Claude grader), POST /test-pipeline (Ollama vs Claude)
+- `src/api/main.py` — FastAPI app with all routes and router includes
+- `src/api/diagnostic.py` — `POST /diagnostic`: raw RAG inspection without LLM
+- `src/api/templates/index.html` — Chat UI (vanilla JS, SSE streaming, conversation sidebar)
 
-### Phase 2 — Multi-Agent System [CURRENT]
-**Status:** Complete
+### Phase 2 — Multi-Agent System [COMPLETE]
 
-Architecture:
+Intent classification routes questions to specialized agents. No LLM call for routing — keyword classifier handles 95%+ of queries with zero latency.
+
 ```
-User Question → CoordinatorAgent → KnowledgeAgent | DataAgent | ActionAgent
-                                      ChromaDB       SQLite      SQLite
+User Question → CoordinatorAgent
+    → keyword classifier (accent-insensitive)
+        → KnowledgeAgent  (regulatory docs via RAG)
+        → DataAgent        (NL→SQL→SQLite→NL interpretation)
+        → ActionAgent      (create alerts, mark COAF reports, log actions)
+        → KnowledgeAgent + DataAgent (combined regulatory+data queries)
 ```
 
-Agents:
-- `src/agents/coordinator.py` — Routes via LLM classification + heuristic fallback
-- `src/agents/knowledge_agent.py` — Wraps Phase 1 RAG pipeline (retrieve → prompt → Ollama)
+Modules:
+- `src/agents/base.py` — `AgentResponse` Pydantic model
+- `src/agents/coordinator.py` — Routes via keyword heuristic; `_is_conversational()` guard; `process()` and `process_stream()` methods
+- `src/agents/knowledge_agent.py` — Wraps Phase 1 RAG pipeline; `answer()` and `prepare()` methods
 - `src/agents/data_agent.py` — NL→SQL→execute→NL-interpret against SQLite compliance.db
 - `src/agents/action_agent.py` — Creates/updates alerts, marks COAF reports, logs actions
+- `src/database/connection.py` — SQLite context-manager helper
+- `src/database/setup.py` — DDL for all tables
+- `src/database/seed.py` — 50 transactions, 5 alerts, 2 default users (analyst/manager)
 
-Database:
-- `data/compliance.db` — SQLite; tables: transactions, alerts, agent_log
-- `src/database/setup.py` — DDL; `src/database/seed.py` — 50 transactions, 5 alerts
+SQLite tables (data/compliance.db):
+- `users` — id, username, password_hash, full_name, role, created_at, last_login, is_active
+- `transactions` — id, client_name, client_cpf, transaction_type, amount, date, branch, channel, reported_to_coaf, pep_flag, notes
+- `alerts` — id, transaction_id, alert_type, severity, description, status, created_at, resolved_at
+- `agent_log` — id, timestamp, agent_name, action, input_summary, output_summary, tokens_used
+- `audit_log` — full LGPD audit record (see Phase 5)
+- `governance_daily_stats` — daily aggregated PII/classification metrics
+- `conversations` — id, user_id, title, created_at, updated_at, is_active
+- `messages` — id, conversation_id, role, content, agent_used, provider, data_classification, pii_detected, timestamp
 
 New API endpoints:
 - `POST /agent` — Multi-agent routing (returns `CoordinatorResponse`)
-- `GET /alerts?status=&severity=` — List compliance alerts with optional filters
-- `GET /transactions?transaction_type=&amount_min=&reported_to_coaf=` — List transactions
+- `GET /alerts?status=&severity=&date_from=&date_to=` — List compliance alerts with optional filters
+- `GET /transactions?transaction_type=&amount_min=&amount_max=&date_from=&date_to=&reported_to_coaf=&pep_flag=` — List transactions
 
 Example multi-agent queries:
 ```bash
 # Data route
 curl -X POST http://localhost:8000/agent \
   -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <token>" \
   -d '{"pergunta": "Quantas transações em espécie não foram reportadas ao COAF?"}'
 
 # Knowledge route
 curl -X POST http://localhost:8000/agent \
   -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <token>" \
   -d '{"pergunta": "Qual o prazo da Resolução CMN 5.274/2025?"}'
 
 # Combined route (KNOWLEDGE+DATA)
 curl -X POST http://localhost:8000/agent \
   -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <token>" \
   -d '{"pergunta": "Verifique se estamos em conformidade com o Art. 49 da Circular 3.978"}'
 
 # Action route
 curl -X POST http://localhost:8000/agent \
   -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <token>" \
   -d '{"pergunta": "Gere um relatório de alertas abertos"}'
 ```
 
-### Phase 3 — Frontend & Integration [FUTURE]
+### Phase 3 — Evaluation System [COMPLETE]
 
-React frontend, real-time SSE streaming, document management panel, JWT auth.
+RAG quality evaluation using Claude as judge, batch benchmarking, and diagnostic inspection.
 
-### Phase 4 — Governance & Observability [FUTURE]
-PII masking (LGPD), structured logging, automated RAG evals, GitHub Actions CI/CD.
+Modules:
+- `src/api/evaluate.py` — `POST /evaluate` (Claude grader), `POST /test-pipeline` (Ollama vs Claude)
+- `src/evaluation/benchmark.py` — Batch runner across 15 compliance test questions
+- `src/evaluation/__init__.py`
 
-### Phase 6 — Conversation Memory [CURRENT]
-**Status:** Complete
+`POST /diagnostic` — Inspects all three pipeline stages without calling the LLM. Returns:
+- `busca_vetorial`: top-50 vector search candidates with cosine similarity scores
+- `expansao_documento`: regulations detected in query, chunks fetched, dedup count, bypass flag
+- `reranking`: cross-encoder results (null when bypassed for small documents)
+- `chunks_enviados_ao_llm`: count of final chunks sent to LLM
 
-Architecture:
+`POST /evaluate` — Claude-as-judge with 5 criteria: `precisao_normativa`, `completude`, `relevancia_chunks`, `coerencia`, `alucinacao`. Returns `nota_geral` + `veredicto` (APROVADO ≥7.0 / REPROVADO <7.0).
+
+`POST /test-pipeline` — Full pipeline: retrieve → Ollama → evaluate with Claude. Returns chunks, answer, evaluation, and `tempo_resposta_segundos`.
+
+Benchmark runner:
+```bash
+python -m src.evaluation.benchmark          # all 15 questions (Ollama)
+python -m src.evaluation.benchmark --provider claude
+python -m src.evaluation.benchmark --compare  # side-by-side Ollama vs Claude
+python -m src.evaluation.benchmark --limit 3  # first 3 only
+```
+Results saved to: `data/benchmark_ollama_YYYY-MM-DD.json`, `data/benchmark_claude_YYYY-MM-DD.json`, `data/benchmark_report.json`
+
+### Phase 4 — Multi-LLM Support [COMPLETE]
+
+Unified LLM router that all agents and endpoints use. Supports per-request provider switching.
+
+```
+API endpoint (provider="ollama"|"claude")
+    → llm_router.generate(prompt, provider)
+        → ollama_client.generate()   OR
+        → claude_client.generate()
+```
+
+Modules:
+- `src/llm/llm_router.py` — `generate(prompt, provider)` and `generate_stream(prompt, provider)`. Returns HTTP 503 if Claude requested without API key.
+
+Switching providers:
+```bash
+# Per-request via API body
+curl -X POST http://localhost:8000/chat \
+  -H "Authorization: Bearer <token>" \
+  -d '{"pergunta": "O que é PLD?", "provider": "claude"}'
+
+# Default for all requests via env var
+export LLM_PROVIDER=claude
+uvicorn src.api.main:app --reload
+```
+
+Browser UI has an `OLLAMA | CLAUDE` toggle in the header.
+
+### Phase 5 — LGPD Governance & Observability [COMPLETE]
+
+Full LGPD compliance layer: PII detection/masking, audit logging with retention, governance dashboard.
+
+```
+Every CoordinatorAgent call →
+    detect_pii(input + output)
+    mask_text(FULL)
+    audit.log_interaction() → audit_log table + governance_daily_stats upsert
+    classify_query() → "public" | "internal" | "confidential" | "restricted"
+    get_retention_expiry() → ISO date per Art. 23 of CMN 4.893
+```
+
+Modules:
+- `src/governance/__init__.py`
+- `src/governance/pii_detector.py` — Detects CPF, full names (Brazilian name list), high-value monetary amounts (≥R$10k), phone numbers, emails. `detect_pii()`, `mask_text()`, `has_pii()`, `count_pii()`. Accent-insensitive, multi-word name detection, overlap resolution.
+- `src/governance/audit.py` — `generate_session_id()`, `classify_query()`, `get_retention_expiry()`, `log_interaction()` (async). Masks PII before storage; stores both original (null when PII present) and masked fields. Upserts `governance_daily_stats`.
+- `src/governance/retention.py` — `purge_expired_pii()` (soft-purge, never deletes rows), `get_retention_report()`
+- `src/api/governance.py` — LGPD dashboard API router at `/governance`
+- `src/api/templates/dashboard.html` — Governance dashboard with Chart.js KPI cards, line chart, classification pie chart, audit log table
+
+Governance API endpoints (all require `manager` role):
+- `GET /governance/dashboard` — PII metrics, classification breakdown, retention alerts (last 30 days)
+- `GET /governance/daily-stats` — Time-series data for line chart (last 30 days)
+- `GET /governance/audit-log?limit=&offset=&agent=&has_pii=` — Paginated masked audit log
+- `GET /governance/retention-report` — Retention status report
+- `POST /governance/purge-expired` — Soft-purge PII records past retention date
+
+Data classification rules:
+- DataAgent + PII → `restricted`
+- DataAgent without PII → `confidential`
+- ActionAgent → `confidential`
+- KnowledgeAgent → `public`
+
+Retention periods (per Art. 23 CMN 4.893):
+- `restricted` → 1 year (365 days)
+- `confidential` → 2 years (730 days)
+- `public`/`internal` → 5 years (1825 days)
+
+### Phase 6 — JWT Authentication [COMPLETE]
+
+Full JWT-based auth with role-based access control. All data endpoints require authentication.
+
+```
+POST /auth/login → JWT token (24h expiry)
+Authorization: Bearer <token> → get_current_user() → TokenUser(user_id, username, role)
+require_role("analyst", "manager") → FastAPI dependency
+```
+
+Modules:
+- `src/api/auth.py` — `TokenUser`, `hash_password()`, `verify_password()`, `create_access_token()`, `get_current_user()`, `require_role()` (dependency factory)
+- `src/api/auth_routes.py` — Auth router at `/auth`
+- `src/api/templates/login.html` — Login page (redirects to chat UI on success)
+
+Auth API endpoints:
+- `POST /auth/login` — Returns `{"access_token": "...", "token_type": "bearer"}`
+- `GET /auth/me` — Returns current user profile (all authenticated users)
+- `POST /auth/register` — Create user (manager role only)
+- `POST /auth/logout` — Stateless logout instruction
+
+Role permissions:
+- `analyst` — can chat, query agent, view documents, alerts, transactions, conversations
+- `manager` — all analyst permissions + ingest PDFs, register users, view governance dashboard
+
+Default seeded users: `analyst` / `analyst123` and `manager` / `manager123`
+
+### Phase 7 — Conversation Memory [COMPLETE]
+
+Persistent multi-turn conversation history with a collapsible sidebar.
+
 ```
 User → POST /agent {conversation_id: N}
      → ConversationService.get_context_messages()  → last 10 msgs as history
      → ConversationService.add_message(user_msg)
-     → CoordinatorAgent.process(history=...)
-         → KnowledgeAgent.answer(history=...)
+     → CoordinatorAgent.process(conversation_history=history)
+         → KnowledgeAgent.answer(conversation_history=history)
              → build_prompt(question, chunks, conversation_history=history)
      → ConversationService.add_message(assistant_msg)
 ```
 
-New modules:
-- `src/services/conversation.py` — ConversationService (create, list_by_user, get_by_id, get_messages, add_message, update_title, delete, get_context_messages, auto_title)
-- `src/api/conversation_routes.py` — CRUD router at /conversations
+Modules:
+- `src/services/__init__.py`
+- `src/services/conversation.py` — `ConversationService`: create, list_by_user, get_by_id, get_messages, add_message, update_title, delete (soft), get_context_messages (last 10 msgs), auto_title
+- `src/api/conversation_routes.py` — CRUD router at `/conversations`
 
-New tables: `conversations`, `messages` (with cascade delete)
-
-API endpoints:
-- `GET  /conversations`              — list user's conversations (auth required)
-- `POST /conversations`              — create conversation (auth required)
-- `GET  /conversations/{id}`         — messages + metadata (auth, must own)
-- `DELETE /conversations/{id}`       — soft-delete (auth, must own)
-- `PATCH /conversations/{id}/title`  — rename (auth, must own)
-
-Context injection: last 10 messages fed into `build_prompt()` between system prompt and RAG chunks. RAG retrieval still uses current question only.
+Conversation API endpoints (all require authentication, ownership enforced):
+- `GET /conversations` — List user's conversations
+- `POST /conversations` — Create conversation
+- `GET /conversations/{id}` — Messages + metadata
+- `DELETE /conversations/{id}` — Soft-delete
+- `PATCH /conversations/{id}/title` — Rename
 
 Frontend: 280px collapsible sidebar with date-grouped history, click-to-load, auto-title on first message, mobile hamburger toggle.
 
-### Phase 7 — SSE Streaming [CURRENT]
-**Status:** Complete
+Context injection: last 10 messages fed into `build_prompt()` between system prompt and RAG chunks. RAG retrieval still uses current question only.
 
-Architecture:
+### Phase 8 — SSE Streaming [COMPLETE]
+
+Token-by-token streaming via Server-Sent Events with thinking animation and route badge.
+
 ```
 POST /agent/stream (SSE, JWT-protected)
   → CoordinatorAgent.process_stream(question, provider, user_id, username, conversation_history)
@@ -144,18 +284,57 @@ POST /agent/stream (SSE, JWT-protected)
 
 New methods:
 - `src/llm/llm_router.py` → `generate_stream(prompt, provider)` — routes streaming to Ollama or Claude
-- `src/agents/knowledge_agent.py` → `KnowledgeAgent.prepare(question, conversation_history)` → `(prompt, chunks)`
-- `src/agents/coordinator.py` → `CoordinatorAgent.process_stream(question, provider, user_id, username, conversation_history)` — async generator
+- `src/agents/knowledge_agent.py` → `prepare(question, conversation_history)` → `(prompt, chunks)`
+- `src/agents/coordinator.py` → `process_stream(...)` — async generator
 
-Endpoints:
-- `POST /agent` — unchanged, returns complete `CoordinatorResponse` JSON
-- `POST /agent/stream` — new, returns `text/event-stream` SSE; requires JWT; accepts `conversation_id`
+API endpoint:
+- `POST /agent/stream` — Returns `text/event-stream` SSE; requires JWT; accepts `conversation_id`
+- `POST /agent` — Unchanged, returns complete `CoordinatorResponse` JSON
 
 Frontend: blinking gold cursor appears immediately on send; tokens render word-by-word; route badge appears on metadata event; source chips and SQL/action blocks appear after streaming completes; conversation sidebar refreshes after done.
+
+### Phase 9 — Docker & CI/CD [COMPLETE]
+
+One-command deployment and automated testing.
+
+Files:
+- `Dockerfile` — Python 3.11-slim, installs system deps (build-essential, gcc), copies code, runs `scripts/start.sh`
+- `docker-compose.yml` — Two services: `app` (FastAPI) + `ollama` (Ollama server); named volumes for ChromaDB and Ollama models; `.env` mounted read-only
+- `.dockerignore`
+- `scripts/start.sh` — Startup script (DB init, model pull, uvicorn)
+- `.github/workflows/ci.yml` — Runs pytest on Python 3.11 and 3.13 on push/PR to master/main; pip cache; excludes `tests/diagnose_rag.py`
+
+```bash
+# One-command startup
+docker compose up --build
+
+# API available at http://localhost:8000
+# Ollama at http://localhost:11434
+```
+
+CI: 142 tests, all external services mocked (ChromaDB, Ollama, Anthropic).
+
+## Architecture Decisions
+
+- **Local-first:** Zero cloud dependency in default config. Ollama for LLM, sentence-transformers for embeddings, SQLite for data.
+- **SQLite over PostgreSQL:** No server to manage. File-based, portable, sufficient for compliance demo data.
+- **ChromaDB over Pinecone/Weaviate:** No API key, no network latency, portable.
+- **Custom agent framework over LangChain:** No framework overhead. Coordinator+3 agents implemented directly with clear separation of concerns.
+- **Keyword routing over LLM routing:** Keyword classifier handles 95%+ of queries with zero latency. LLM routing was removed after benchmarking showed it added 5+ seconds with no accuracy benefit.
+- **Cross-encoder reranking:** Retrieves top-50, reranks to top-20. Better precision than pure vector search.
+- **Reranker bypass:** When a named regulation has ≤30 chunks, all chunks are sent directly to the LLM (skipping reranking). Prevents over-compression of small documents.
+- **Multilingual reranker:** Uses `cross-encoder/mmarco-mMiniLMv2-L12-H384-v1` (trained on mMARCO multilingual data including Brazilian Portuguese). Switched from English-only `ms-marco-MiniLM-L-6-v2` after benchmark showed it discarded correct Portuguese chunks.
+- **Portuguese prompts:** All system prompts, error messages, and API responses are in Brazilian Portuguese.
+- **Pydantic Settings:** All config from environment variables with `.env` file support.
+- **JWT stateless auth:** 24h tokens, bcrypt password hashing, role-based access via FastAPI dependency factory.
+- **Soft-purge retention:** Audit records are never deleted. PII text fields are overwritten with `[DADO_EXPIRADO]`; metadata preserved for 5-year regulatory trail per CMN 4.893.
+- **Vanilla frontend:** No build step, no npm. HTML + CSS + JS served directly by FastAPI as static HTML responses.
 
 ## Development Rules
 
 - **NEVER use git worktrees.** Always work directly on `master` or create simple feature branches with `git checkout -b feature/xxx`. Worktrees cause environment fragmentation (missing `.env`, missing DB, missing indexed documents) and should not be used in this project.
+- **Before pushing:** Run `python -m pytest tests/ --ignore=tests/diagnose_rag.py -v --tb=short` locally and confirm 0 failures.
+- **diagnose_rag.py is excluded from CI:** It makes real Ollama/ChromaDB calls and is not a pytest test.
 
 ## CI/CD
 
@@ -165,24 +344,13 @@ GitHub Actions runs on every push to `master` and every pull request.
 - **What it does:** Runs `python -m pytest tests/ --ignore=tests/diagnose_rag.py -v --tb=short --timeout=60` on Python 3.11 and 3.13 with pip dependency caching
 - **No secrets needed:** All config has safe defaults or Optional fallbacks; all external services (Ollama, ChromaDB, Anthropic) are mocked in tests
 - **diagnose_rag.py is excluded:** It makes real Ollama/ChromaDB calls and is not a pytest test
-- **Before pushing:** Run `python -m pytest tests/ --ignore=tests/diagnose_rag.py -v --tb=short` locally and confirm 0 failures
 - **Badge:** Add to README after setting up the GitHub remote: `![CI](https://github.com/YOUR_USER/YOUR_REPO/actions/workflows/ci.yml/badge.svg)`
-
-## Architecture Decisions
-
-- **Local-first:** Zero cloud dependency. Ollama for LLM, sentence-transformers for embeddings.
-- **ChromaDB over Pinecone/Weaviate:** No API key, no network latency, portable.
-- **Cross-encoder reranking:** Retrieves top-50, reranks to top-20. Better precision than pure vector search.
-- **Reranker bypass:** When a named regulation has ≤30 chunks, all chunks are sent directly to the LLM (skipping reranking). Used for small documents where the reranker may compress results too aggressively.
-- **Multilingual reranker:** Uses `cross-encoder/mmarco-mMiniLMv2-L12-H384-v1` (trained on mMARCO multilingual data including Brazilian Portuguese). Switched from the English-only `ms-marco-MiniLM-L-6-v2` after benchmark showed it discarded correct Portuguese chunks.
-- **Portuguese prompts:** All system prompts, error messages, and API responses are in Brazilian Portuguese.
-- **Pydantic Settings:** All config from environment variables with `.env` file support.
 
 ## Coding Conventions
 
 - **Type hints** on all function signatures and class attributes
 - **Docstrings** on all public functions and classes (Google style)
-- **Async** for all FastAPI endpoints and Ollama client
+- **Async** for all FastAPI endpoints and LLM clients
 - **dataclasses** for internal data transfer objects (DocumentPage, TextChunk, RetrievedChunk)
 - **No global state** — models loaded inside functions or dependency-injected
 - All user-facing text in **Brazilian Portuguese**
@@ -200,30 +368,54 @@ GitHub Actions runs on every push to `master` and every pull request.
 | src/retrieval/prompt_builder.py | ✅ Done |
 | src/llm/ollama_client.py | ✅ Done |
 | src/llm/claude_client.py | ✅ Done |
+| src/llm/llm_router.py | ✅ Done |
 | src/api/main.py | ✅ Done |
+| src/api/auth.py | ✅ Done |
+| src/api/auth_routes.py | ✅ Done |
 | src/api/diagnostic.py | ✅ Done |
 | src/api/evaluate.py | ✅ Done |
+| src/api/governance.py | ✅ Done |
+| src/api/conversation_routes.py | ✅ Done |
 | src/api/templates/index.html | ✅ Done |
-| Dockerfile + docker-compose.yml | ✅ Done |
-| scripts/start.sh | ✅ Done |
-| .dockerignore | ✅ Done |
-| README.md | ✅ Done |
-| src/database/connection.py | ✅ Done |
-| src/database/setup.py | ✅ Done |
-| src/database/seed.py | ✅ Done |
+| src/api/templates/login.html | ✅ Done |
+| src/api/templates/dashboard.html | ✅ Done |
 | src/agents/base.py | ✅ Done |
+| src/agents/coordinator.py | ✅ Done |
 | src/agents/knowledge_agent.py | ✅ Done |
 | src/agents/data_agent.py | ✅ Done |
 | src/agents/action_agent.py | ✅ Done |
-| src/agents/coordinator.py | ✅ Done |
-| src/evaluation/benchmark.py | ✅ Done |
+| src/database/connection.py | ✅ Done |
+| src/database/setup.py | ✅ Done |
+| src/database/seed.py | ✅ Done |
+| src/governance/__init__.py | ✅ Done |
+| src/governance/pii_detector.py | ✅ Done |
+| src/governance/audit.py | ✅ Done |
+| src/governance/retention.py | ✅ Done |
+| src/services/__init__.py | ✅ Done |
 | src/services/conversation.py | ✅ Done |
-| src/api/conversation_routes.py | ✅ Done |
-| src/llm/llm_router.py | ✅ Done |
-| tests/test_streaming.py | ✅ Done |
+| src/evaluation/__init__.py | ✅ Done |
+| src/evaluation/benchmark.py | ✅ Done |
+| Dockerfile | ✅ Done |
+| docker-compose.yml | ✅ Done |
+| .dockerignore | ✅ Done |
+| scripts/start.sh | ✅ Done |
 | .github/workflows/ci.yml | ✅ Done |
+| tests/test_api.py | ✅ Done |
+| tests/test_agents.py | ✅ Done |
+| tests/test_agent_provider.py | ✅ Done |
+| tests/test_auth.py | ❌ Not yet written |
+| tests/test_chunker.py | ✅ Done |
+| tests/test_conversations.py | ✅ Done |
+| tests/test_coordinator.py | ✅ Done |
+| tests/test_database.py | ✅ Done |
+| tests/test_embedder.py | ✅ Done |
+| tests/test_llm_router.py | ✅ Done |
+| tests/test_pdf_loader.py | ✅ Done |
+| tests/test_query_engine.py | ✅ Done |
+| tests/test_retrieval_fixes.py | ✅ Done |
+| tests/test_streaming.py | ✅ Done |
 
-## Running Locally (Phase 1)
+## Running Locally
 
 ```bash
 # Install deps
@@ -233,35 +425,118 @@ pip install -r requirements.txt
 ollama serve
 ollama pull llama3:8b
 
-# Set Anthropic key for evaluation endpoints (optional)
+# Set Anthropic key for Claude features (optional)
 export ANTHROPIC_API_KEY=sk-ant-...
 
 # Start API
 uvicorn src.api.main:app --reload
 
-# Drop PDFs in data/raw/, then:
-curl -X POST http://localhost:8000/ingest
-curl -X POST http://localhost:8000/chat -H "Content-Type: application/json" \
-     -d '{"pergunta": "O que e politica de conformidade?"}'
+# Open browser
+open http://localhost:8000/login
+# Default credentials: analyst/analyst123 or manager/manager123
+
+# Or use the API directly with a token:
+TOKEN=$(curl -s -X POST http://localhost:8000/auth/login \
+  -d "username=analyst&password=analyst123" | python3 -c "import sys,json; print(json.load(sys.stdin)['access_token'])")
+
+curl -X POST http://localhost:8000/chat \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $TOKEN" \
+  -d '{"pergunta": "O que é política de conformidade?"}'
 
 # Use Claude instead of Ollama for a single request:
-curl -X POST http://localhost:8000/chat -H "Content-Type: application/json" \
-     -d '{"pergunta": "O que e PLD?", "provider": "claude"}'
+curl -X POST http://localhost:8000/chat \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $TOKEN" \
+  -d '{"pergunta": "O que é PLD?", "provider": "claude"}'
 
-# Inspect RAG results without calling any LLM:
-curl -X POST http://localhost:8000/diagnostic -H "Content-Type: application/json" \
-     -d '{"pergunta": "O que e ciberseguranca?"}'
-
-# Grade a response using Claude as judge:
-curl -X POST http://localhost:8000/evaluate -H "Content-Type: application/json" \
-     -d '{"pergunta": "O que e compliance?", "resposta": "Compliance e conformidade regulatoria."}'
-
-# Compare Ollama vs Claude side-by-side:
-curl -X POST http://localhost:8000/test-pipeline -H "Content-Type: application/json" \
-     -d '{"pergunta": "Quais sao as obrigacoes de ciberseguranca?"}'
+# Ingest PDFs (manager role required):
+# Drop PDFs in data/raw/, then:
+curl -X POST http://localhost:8000/ingest \
+  -H "Authorization: Bearer $MANAGER_TOKEN"
 ```
 
-## Evaluation System (Phase 1 Extension)
+## Docker Quick Start
+
+```bash
+# Build and start everything (FastAPI + Ollama)
+docker compose up --build
+
+# First run: pull the model (in a separate terminal)
+docker compose exec ollama ollama pull llama3:8b
+
+# API at http://localhost:8000
+# Login at http://localhost:8000/login
+# Governance dashboard at http://localhost:8000/dashboard (manager only)
+```
+
+Environment variables (`.env` file, mounted read-only into container):
+```
+ANTHROPIC_API_KEY=sk-ant-...   # optional, for Claude features
+JWT_SECRET_KEY=your-secret     # change in production
+LLM_PROVIDER=ollama            # or "claude"
+```
+
+## API Endpoints
+
+All endpoints except `/`, `/login`, `/dashboard`, and `/auth/login` require `Authorization: Bearer <token>`.
+
+### Auth
+| Method | Path | Role | Description |
+|--------|------|------|-------------|
+| POST | /auth/login | — | Login, returns JWT token |
+| GET | /auth/me | any | Current user profile |
+| POST | /auth/register | manager | Create new user |
+| POST | /auth/logout | any | Stateless logout |
+
+### Chat & Agent
+| Method | Path | Role | Description |
+|--------|------|------|-------------|
+| POST | /chat | analyst, manager | RAG answer with citations (no agent routing) |
+| POST | /agent | analyst, manager | Multi-agent routing, full JSON response |
+| POST | /agent/stream | analyst, manager | Multi-agent SSE streaming |
+
+### Documents & Data
+| Method | Path | Role | Description |
+|--------|------|------|-------------|
+| POST | /ingest | manager | Index PDFs from data/raw/ |
+| GET | /documents | analyst, manager | List indexed documents |
+| GET | /alerts | analyst, manager | Compliance alerts (filterable) |
+| GET | /transactions | analyst, manager | Transaction list (filterable) |
+
+### Conversations
+| Method | Path | Role | Description |
+|--------|------|------|-------------|
+| GET | /conversations | analyst, manager | List user's conversations |
+| POST | /conversations | analyst, manager | Create conversation |
+| GET | /conversations/{id} | analyst, manager | Messages + metadata |
+| DELETE | /conversations/{id} | analyst, manager | Soft-delete |
+| PATCH | /conversations/{id}/title | analyst, manager | Rename |
+
+### Governance (manager only)
+| Method | Path | Role | Description |
+|--------|------|------|-------------|
+| GET | /governance/dashboard | manager | PII KPIs, classification breakdown, retention alerts |
+| GET | /governance/daily-stats | manager | 30-day time-series for charts |
+| GET | /governance/audit-log | manager | Paginated masked audit log |
+| GET | /governance/retention-report | manager | Retention status report |
+| POST | /governance/purge-expired | manager | Soft-purge PII past retention date |
+
+### Diagnostic & Evaluation
+| Method | Path | Role | Description |
+|--------|------|------|-------------|
+| POST | /diagnostic | any | RAG pipeline inspection without LLM |
+| POST | /evaluate | any | Grade response with Claude as judge |
+| POST | /test-pipeline | any | Run full pipeline + evaluate |
+
+### Pages
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | / | Chat interface (index.html) |
+| GET | /login | Login page |
+| GET | /dashboard | Governance dashboard |
+
+## Evaluation System
 
 `POST /diagnostic` — Inspects all three stages of the RAG pipeline without calling the LLM. Returns:
 - `busca_vetorial`: top-50 vector search candidates with cosine similarity scores
@@ -283,9 +558,9 @@ curl -X POST http://localhost:8000/test-pipeline -H "Content-Type: application/j
 ```bash
 python -m src.evaluation.benchmark          # all 15 questions
 python -m src.evaluation.benchmark --limit 3  # first 3 only
+python -m src.evaluation.benchmark --provider claude
+python -m src.evaluation.benchmark --compare  # Ollama vs Claude side-by-side
 ```
-
-`POST /chat` accepts an optional `"provider": "claude"` field to route a single request to Claude instead of Ollama.
 
 ## Multi-LLM Support
 
@@ -297,11 +572,13 @@ ComplianceAgent supports two LLM backends for generation. The default is always 
 ```bash
 # Chat endpoint with Claude
 curl -X POST http://localhost:8000/chat \
+  -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"pergunta": "O que é PLD?", "provider": "claude"}'
 
 # Agent endpoint with Claude
 curl -X POST http://localhost:8000/agent \
+  -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"pergunta": "Qual o prazo da Resolução 5.274?", "provider": "claude"}'
 ```
@@ -318,7 +595,7 @@ uvicorn src.api.main:app --reload
 
 ### LLM Router
 
-`src/llm/llm_router.py` provides a unified `generate(prompt, provider)` interface used by all agents. Agents no longer call `ollama_client` or `claude_client` directly — they call the router.
+`src/llm/llm_router.py` provides a unified `generate(prompt, provider)` and `generate_stream(prompt, provider)` interface used by all agents. Agents do not call `ollama_client` or `claude_client` directly.
 
 ### Comparative Benchmarking
 
