@@ -680,6 +680,18 @@
             .hamburger { display: block; }
             .chat-area { max-width: 100%; }
         }
+
+        /* ── Streaming cursor ───────────────────────────── */
+        .streaming-cursor {
+            animation: cursor-blink 0.7s step-end infinite;
+            color: var(--gold);
+            font-weight: 300;
+        }
+        @keyframes cursor-blink {
+            0%, 100% { opacity: 1; }
+            50%       { opacity: 0; }
+        }
+        .streaming-text { min-height: 1.2em; }
     </style>
 </head>
 <body>
@@ -1090,21 +1102,100 @@
         document.getElementById('sidebar').classList.toggle('mobile-open');
     }
 
+    function createStreamingMessage() {
+        removeWelcome();
+        const d = document.createElement('div');
+        d.className = 'msg assistant';
+        d.innerHTML = `
+            <div class="avatar">⚖</div>
+            <div class="msg-body">
+                <div class="route-meta" id="stream-meta"></div>
+                <div class="bubble streaming-text" id="stream-content">
+                    <span class="streaming-cursor">▊</span>
+                </div>
+            </div>`;
+        msgs.appendChild(d);
+        scrollDown();
+        return d;
+    }
+
+    function updateStreamingHeader(msgDiv, roteamento, agentes) {
+        const meta = msgDiv.querySelector('#stream-meta');
+        if (!meta) return;
+        const rm = ROUTE_META[roteamento] || { cls: 'knowledge', label: roteamento };
+        const pills = (agentes || []).map(a =>
+            `<span class="agent-pill">${esc(AGENT_LABEL[a] || a)}</span>`
+        ).join('');
+        meta.innerHTML = `<span class="route-badge ${rm.cls}">${esc(rm.label)}</span>${pills}`;
+    }
+
+    function updateStreamingContent(msgDiv, text) {
+        const content = msgDiv.querySelector('#stream-content');
+        if (!content) return;
+        content.innerHTML = esc(text) + '<span class="streaming-cursor">▊</span>';
+    }
+
+    function finalizeStreamingMessage(msgDiv, {roteamento, agentes_utilizados, sources, sqlData, actionsData, pii_detected, data_classification}) {
+        const meta = msgDiv.querySelector('#stream-meta');
+        if (meta) {
+            meta.removeAttribute('id');
+            const rm = ROUTE_META[roteamento] || { cls: 'knowledge', label: roteamento };
+            const pills = (agentes_utilizados || []).map(a =>
+                `<span class="agent-pill">${esc(AGENT_LABEL[a] || a)}</span>`
+            ).join('');
+            let classBadge = '';
+            if (data_classification && data_classification !== 'public') {
+                classBadge = `<span class="classification-badge badge-${esc(data_classification)}">${esc(data_classification.toUpperCase())}</span>`;
+            }
+            meta.innerHTML = `<span class="route-badge ${rm.cls}">${esc(rm.label)}</span>${pills}${classBadge}`;
+        }
+        const content = msgDiv.querySelector('#stream-content');
+        if (content) {
+            const cursor = content.querySelector('.streaming-cursor');
+            if (cursor) cursor.remove();
+            content.removeAttribute('id');
+            content.classList.remove('streaming-text');
+        }
+        const body = msgDiv.querySelector('.msg-body');
+        if (!body) return;
+        if (sqlData && sqlData.sql) {
+            body.insertAdjacentHTML('beforeend', buildSqlBlock(sqlData));
+        }
+        if (actionsData && actionsData.length > 0) {
+            body.insertAdjacentHTML('beforeend', buildActions(actionsData));
+        }
+        if (sources && sources.length > 0) {
+            body.insertAdjacentHTML('beforeend', buildSources(sources));
+        }
+        if (pii_detected) {
+            const piiDiv = document.createElement('div');
+            piiDiv.className = 'pii-notice';
+            piiDiv.textContent = '🔒 Esta resposta contém dados pessoais protegidos pela LGPD. Uso restrito a fins de compliance.';
+            body.appendChild(piiDiv);
+        }
+        scrollDown();
+    }
+
     async function send() {
         const q = input.value.trim();
         if (!q || loading) return;
 
-        // Auto-create conversation on first send
+        // Auto-create conversation on first send if not in an existing one
         if (!currentConversationId) {
             try {
                 const res = await fetch('/conversations', {
                     method: 'POST',
-                    headers: {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'},
+                    headers: {
+                        'Authorization': 'Bearer ' + token,
+                        'Content-Type': 'application/json',
+                    },
                     body: JSON.stringify({}),
                 });
-                if (res.ok) currentConversationId = (await res.json()).id;
-                else return;  // abort if conversation couldn't be created
-            } catch (e) { return; }
+                if (res.ok) {
+                    const conv = await res.json();
+                    currentConversationId = conv.id;
+                }
+            } catch (_) {}
         }
 
         loading = true;
@@ -1113,12 +1204,15 @@
         input.style.height = 'auto';
 
         appendUser(q);
-        showTyping();
+        const msgDiv = createStreamingMessage();
 
         try {
-            const res = await fetch('/agent', {
+            const res = await fetch('/agent/stream', {
                 method: 'POST',
-                headers: {'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token},
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': 'Bearer ' + token,
+                },
                 body: JSON.stringify({
                     pergunta: q,
                     provider: currentProvider,
@@ -1126,10 +1220,82 @@
                 }),
             });
             if (!res.ok) throw new Error('HTTP ' + res.status);
-            hideTyping();
-            appendAgentResponse(await res.json());
-            loadConversations();  // refresh sidebar order + title
+
+            const reader = res.body.getReader();
+            const decoder = new TextDecoder();
+            let buffer = '';
+            let metadata = null;
+            let sources = [];
+            let sqlData = null;
+            let actionsData = null;
+            let fullText = '';
+            let piiDetected = false;
+            let dataClassification = 'public';
+            let serverError = null;
+
+            outer:
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                buffer += decoder.decode(value, { stream: true });
+                const lines = buffer.split('\n');
+                buffer = lines.pop();
+
+                for (const line of lines) {
+                    if (!line.startsWith('data: ')) continue;
+                    const jsonStr = line.slice(6).trim();
+                    if (!jsonStr) continue;
+                    try {
+                        const event = JSON.parse(jsonStr);
+                        switch (event.type) {
+                            case 'metadata':
+                                metadata = event;
+                                updateStreamingHeader(msgDiv, event.roteamento, event.agentes_utilizados);
+                                break;
+                            case 'token':
+                                fullText += event.content;
+                                updateStreamingContent(msgDiv, fullText);
+                                scrollDown();
+                                break;
+                            case 'sources':
+                                sources = event.chunks || [];
+                                break;
+                            case 'sql':
+                                sqlData = event;
+                                break;
+                            case 'actions':
+                                actionsData = event.acoes || [];
+                                break;
+                            case 'done':
+                                piiDetected = event.pii_detected || false;
+                                dataClassification = event.data_classification || 'public';
+                                break;
+                            case 'error':
+                                serverError = event.message;
+                                break outer;
+                        }
+                    } catch (_) {
+                        // Skip malformed SSE events
+                    }
+                }
+            }
+
+            if (serverError) throw new Error(serverError);
+
+            finalizeStreamingMessage(msgDiv, {
+                roteamento: metadata?.roteamento || 'KNOWLEDGE',
+                agentes_utilizados: metadata?.agentes_utilizados || [],
+                sources,
+                sqlData,
+                actionsData,
+                pii_detected: piiDetected,
+                data_classification: dataClassification,
+            });
+
+            loadConversations(); // refresh sidebar with updated conversation
+
         } catch (err) {
+            if (msgDiv && msgDiv.parentNode) msgDiv.parentNode.removeChild(msgDiv);
             appendError(
                 currentProvider === 'claude'
                     ? 'Erro ao obter resposta do Claude. Verifique se ANTHROPIC_API_KEY está configurado.'
