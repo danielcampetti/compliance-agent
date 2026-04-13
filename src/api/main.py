@@ -40,6 +40,7 @@ from src.services.conversation import ConversationService
 from src.api.diagnostic import router as diagnostic_router
 from src.api.evaluate import router as evaluate_router
 from src.api.conversation_routes import conversation_router
+from src.api.governance import governance_router
 
 app = FastAPI(
     title="ComplianceAgent API",
@@ -51,6 +52,7 @@ app.include_router(auth_router)
 app.include_router(diagnostic_router)
 app.include_router(evaluate_router)
 app.include_router(conversation_router)
+app.include_router(governance_router)
 
 
 # -- Request / Response models -----------------------------------------------

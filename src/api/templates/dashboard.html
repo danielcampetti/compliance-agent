@@ -1,8 +1,652 @@
 <!DOCTYPE html>
 <html lang="pt-BR">
-<head><meta charset="UTF-8"><title>Dashboard</title></head>
-<body style="background:#0c0b0a;color:#e8e0cc;font-family:sans-serif;padding:2rem">
-<h1>Dashboard</h1>
-<a href="/" style="color:#c8a84b">← Voltar ao Chat</a>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ComplianceAgent — Dashboard</title>
+    <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=JetBrains+Mono:wght@300;400&family=Outfit:wght@300;400;500&display=swap" rel="stylesheet">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+    <style>
+        *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+        :root{
+            --bg:       #0a0a1a;
+            --panel:    #0f0f1f;
+            --card:     #141428;
+            --border:   rgba(201,168,76,.14);
+            --gold:     #c9a84c;
+            --gold-dim: rgba(201,168,76,.45);
+            --text:     #e8e0cc;
+            --text-2:   #9a9080;
+            --green:    #6ee7b7;
+            --red:      #fc8181;
+            --blue:     #93c5fd;
+            --yellow:   #fde68a;
+        }
+        body{background:var(--bg);color:var(--text);font-family:'Outfit',sans-serif;font-weight:300;min-height:100vh}
+
+        /* ── Top bar ──────────────────────────────────────── */
+        .topbar{
+            background:var(--panel);
+            border-bottom:1px solid var(--border);
+            padding:.9rem 2rem;
+            display:flex;align-items:center;justify-content:space-between;
+            position:sticky;top:0;z-index:100;
+        }
+        .brand{font-family:'DM Serif Display',serif;font-size:1.15rem;color:var(--text)}
+        .brand span{font-family:'JetBrains Mono',monospace;font-size:.55rem;color:var(--gold);letter-spacing:.15em;opacity:.75;margin-left:.6rem;vertical-align:middle}
+        .topbar-right{display:flex;align-items:center;gap:1.2rem}
+        .refresh-badge{font-family:'JetBrains Mono',monospace;font-size:.58rem;color:var(--text-2);letter-spacing:.06em}
+        .refresh-badge span{color:var(--gold)}
+        .btn-back{
+            font-family:'JetBrains Mono',monospace;font-size:.6rem;letter-spacing:.08em;
+            color:var(--text-2);text-decoration:none;
+            border:1px solid var(--border);border-radius:6px;padding:.35rem .8rem;
+            transition:color .2s,border-color .2s;
+        }
+        .btn-back:hover{color:var(--gold);border-color:var(--gold-dim)}
+
+        /* ── Main layout ──────────────────────────────────── */
+        .main{max-width:1400px;margin:0 auto;padding:2rem 2rem 4rem}
+
+        /* ── Alerts bar ───────────────────────────────────── */
+        .alerts-bar{
+            background:rgba(253,230,138,.07);
+            border:1px solid rgba(253,230,138,.2);
+            border-radius:8px;padding:.7rem 1.2rem;
+            font-family:'JetBrains Mono',monospace;font-size:.65rem;
+            color:var(--yellow);letter-spacing:.03em;margin-bottom:1.8rem;
+            display:none;
+        }
+        .alerts-bar.show{display:block}
+
+        /* ── Section titles ───────────────────────────────── */
+        .section-title{
+            font-family:'JetBrains Mono',monospace;font-size:.6rem;
+            color:var(--gold);letter-spacing:.18em;opacity:.8;
+            margin-bottom:1rem;text-transform:uppercase;
+        }
+
+        /* ── KPI cards ────────────────────────────────────── */
+        .kpi-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:1rem;margin-bottom:2rem}
+        @media(max-width:900px){.kpi-grid{grid-template-columns:repeat(2,1fr)}}
+        .kpi{
+            background:var(--card);border:1px solid var(--border);border-radius:12px;
+            padding:1.4rem 1.6rem;
+        }
+        .kpi-label{
+            font-family:'JetBrains Mono',monospace;font-size:.58rem;
+            color:var(--text-2);letter-spacing:.1em;margin-bottom:.6rem;
+        }
+        .kpi-value{font-family:'DM Serif Display',serif;font-size:2.2rem;color:var(--text);line-height:1}
+        .kpi-sub{font-family:'JetBrains Mono',monospace;font-size:.6rem;color:var(--text-2);margin-top:.4rem}
+        .kpi.pii .kpi-value{color:var(--yellow)}
+        .kpi.restr .kpi-value{color:var(--red)}
+        .kpi.alerts .kpi-value{color:var(--green)}
+
+        /* ── Charts grid ──────────────────────────────────── */
+        .charts-grid{display:grid;grid-template-columns:2fr 1fr;gap:1rem;margin-bottom:2rem}
+        .charts-row{display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin-bottom:2rem}
+        @media(max-width:900px){.charts-grid,.charts-row{grid-template-columns:1fr}}
+        .chart-card{
+            background:var(--card);border:1px solid var(--border);border-radius:12px;
+            padding:1.4rem 1.6rem;
+        }
+        .chart-card h3{
+            font-family:'JetBrains Mono',monospace;font-size:.62rem;color:var(--text-2);
+            letter-spacing:.08em;margin-bottom:1.2rem;
+        }
+        .chart-wrap{position:relative;height:220px}
+
+        /* ── Retention stats ──────────────────────────────── */
+        .retention-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:1rem;margin-bottom:2rem}
+        @media(max-width:900px){.retention-grid{grid-template-columns:repeat(2,1fr)}}
+        .ret-stat{
+            background:var(--card);border:1px solid var(--border);border-radius:12px;
+            padding:1.2rem 1.4rem;
+        }
+        .ret-label{font-family:'JetBrains Mono',monospace;font-size:.58rem;color:var(--text-2);letter-spacing:.1em;margin-bottom:.5rem}
+        .ret-value{font-family:'JetBrains Mono',monospace;font-size:1.4rem;color:var(--text)}
+
+        /* ── Audit log ────────────────────────────────────── */
+        .log-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem;flex-wrap:wrap;gap:.8rem}
+        .filters{display:flex;gap:.6rem;flex-wrap:wrap}
+        .filter-select,.filter-input{
+            background:var(--panel);border:1px solid var(--border);border-radius:6px;
+            padding:.35rem .7rem;color:var(--text);
+            font-family:'JetBrains Mono',monospace;font-size:.62rem;
+            outline:none;transition:border-color .2s;
+        }
+        .filter-select:focus,.filter-input:focus{border-color:var(--gold-dim)}
+        .filter-input{width:140px}
+        .action-btns{display:flex;gap:.6rem}
+        .btn{
+            font-family:'JetBrains Mono',monospace;font-size:.6rem;letter-spacing:.07em;
+            border-radius:6px;padding:.38rem .9rem;cursor:pointer;border:none;
+            transition:opacity .18s;
+        }
+        .btn:hover{opacity:.8}
+        .btn-gold{background:var(--gold);color:#0a0a1a}
+        .btn-outline{background:transparent;border:1px solid var(--border);color:var(--text-2)}
+        .btn-outline:hover{border-color:var(--gold-dim);color:var(--gold)}
+        .btn-danger{background:rgba(252,129,129,.12);border:1px solid rgba(252,129,129,.25);color:var(--red)}
+        .btn-danger:hover{background:rgba(252,129,129,.2)}
+
+        table{width:100%;border-collapse:collapse;font-size:.75rem}
+        thead th{
+            font-family:'JetBrains Mono',monospace;font-size:.55rem;color:var(--text-2);
+            letter-spacing:.08em;text-align:left;padding:.6rem .8rem;
+            border-bottom:1px solid var(--border);white-space:nowrap;
+        }
+        tbody tr{border-bottom:1px solid rgba(255,255,255,.04);transition:background .15s}
+        tbody tr:hover{background:rgba(201,168,76,.04)}
+        td{padding:.55rem .8rem;color:var(--text);vertical-align:top;max-width:260px}
+        td.mono{font-family:'JetBrains Mono',monospace;font-size:.65rem}
+        td.trunc{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:200px}
+
+        .badge{
+            display:inline-block;font-family:'JetBrains Mono',monospace;font-size:.52rem;
+            letter-spacing:.06em;border-radius:4px;padding:.18rem .5rem;white-space:nowrap;
+        }
+        .badge-public   {background:rgba(110,231,183,.12);color:var(--green)}
+        .badge-internal {background:rgba(147,197,253,.12);color:var(--blue)}
+        .badge-confidential{background:rgba(253,230,138,.12);color:var(--yellow)}
+        .badge-restricted  {background:rgba(252,129,129,.12);color:var(--red)}
+        .badge-pii  {background:rgba(253,230,138,.12);color:var(--yellow)}
+        .badge-clean{background:rgba(110,231,183,.08);color:var(--text-2)}
+
+        .pagination{display:flex;align-items:center;justify-content:space-between;margin-top:1rem;flex-wrap:wrap;gap:.5rem}
+        .page-info{font-family:'JetBrains Mono',monospace;font-size:.6rem;color:var(--text-2)}
+        .page-btns{display:flex;gap:.4rem}
+
+        .skeleton{background:rgba(255,255,255,.06);border-radius:6px;animation:sk 1.4s ease-in-out infinite}
+        @keyframes sk{0%,100%{opacity:.4}50%{opacity:.8}}
+
+        .empty{
+            text-align:center;padding:3rem;
+            font-family:'JetBrains Mono',monospace;font-size:.7rem;color:var(--text-2);
+        }
+    </style>
+</head>
+<body>
+
+<div class="topbar">
+    <div>
+        <span class="brand">ComplianceAgent <span>LGPD DASHBOARD</span></span>
+    </div>
+    <div class="topbar-right">
+        <span class="refresh-badge">AUTO-REFRESH <span id="countdown">60</span>s</span>
+        <a href="/" class="btn-back">← Voltar ao Chat</a>
+    </div>
+</div>
+
+<div class="main">
+    <!-- Alerts -->
+    <div class="alerts-bar" id="alerts-bar"></div>
+
+    <!-- KPI Cards -->
+    <div class="section-title">Visão Geral — Últimos 30 dias</div>
+    <div class="kpi-grid">
+        <div class="kpi">
+            <div class="kpi-label">TOTAL CONSULTAS</div>
+            <div class="kpi-value" id="kpi-total">—</div>
+            <div class="kpi-sub" id="kpi-total-sub">carregando...</div>
+        </div>
+        <div class="kpi pii">
+            <div class="kpi-label">COM PII DETECTADO</div>
+            <div class="kpi-value" id="kpi-pii">—</div>
+            <div class="kpi-sub" id="kpi-pii-sub">carregando...</div>
+        </div>
+        <div class="kpi restr">
+            <div class="kpi-label">RESTRITAS</div>
+            <div class="kpi-value" id="kpi-restricted">—</div>
+            <div class="kpi-sub">classificação restrita</div>
+        </div>
+        <div class="kpi alerts">
+            <div class="kpi-label">ALERTAS ABERTOS</div>
+            <div class="kpi-value" id="kpi-alerts">—</div>
+            <div class="kpi-sub">compliance alerts</div>
+        </div>
+    </div>
+
+    <!-- Charts row 1: line + doughnut -->
+    <div class="charts-grid">
+        <div class="chart-card">
+            <h3>CONSULTAS POR DIA</h3>
+            <div class="chart-wrap"><canvas id="chart-daily"></canvas></div>
+        </div>
+        <div class="chart-card">
+            <h3>CLASSIFICAÇÃO DE DADOS</h3>
+            <div class="chart-wrap"><canvas id="chart-class"></canvas></div>
+        </div>
+    </div>
+
+    <!-- Charts row 2: two bar charts -->
+    <div class="charts-row">
+        <div class="chart-card">
+            <h3>PII POR TIPO</h3>
+            <div class="chart-wrap"><canvas id="chart-pii"></canvas></div>
+        </div>
+        <div class="chart-card">
+            <h3>CONSULTAS POR AGENTE</h3>
+            <div class="chart-wrap"><canvas id="chart-agent"></canvas></div>
+        </div>
+    </div>
+
+    <!-- Retention stats -->
+    <div class="section-title">Retenção de Dados (LGPD)</div>
+    <div class="retention-grid" style="margin-bottom:2rem">
+        <div class="ret-stat">
+            <div class="ret-label">REGISTROS COM PII</div>
+            <div class="ret-value" id="ret-with-pii">—</div>
+        </div>
+        <div class="ret-stat">
+            <div class="ret-label">PII PURGADO</div>
+            <div class="ret-value" id="ret-purged">—</div>
+        </div>
+        <div class="ret-stat">
+            <div class="ret-label">EXPIRANDO (30 DIAS)</div>
+            <div class="ret-value" id="ret-expiring" style="color:var(--yellow)">—</div>
+        </div>
+        <div class="ret-stat">
+            <div class="ret-label">REGISTRO MAIS ANTIGO</div>
+            <div class="ret-value" id="ret-oldest" style="font-size:.85rem">—</div>
+        </div>
+    </div>
+
+    <!-- Action buttons -->
+    <div style="display:flex;gap:.7rem;margin-bottom:2.5rem;flex-wrap:wrap">
+        <button class="btn btn-danger" onclick="purgeExpired()">Purgar PII Expirado</button>
+        <button class="btn btn-outline" onclick="exportCsv()">Exportar CSV</button>
+    </div>
+
+    <!-- Audit log table -->
+    <div class="section-title">Audit Log</div>
+    <div class="log-header">
+        <div class="filters">
+            <input class="filter-input" id="f-username" placeholder="usuário..." oninput="debounceReload()">
+            <select class="filter-select" id="f-class" onchange="loadLog(1)">
+                <option value="">Todas classificações</option>
+                <option value="public">Public</option>
+                <option value="internal">Internal</option>
+                <option value="confidential">Confidential</option>
+                <option value="restricted">Restricted</option>
+            </select>
+            <select class="filter-select" id="f-pii" onchange="loadLog(1)">
+                <option value="">Com/sem PII</option>
+                <option value="true">Com PII</option>
+                <option value="false">Sem PII</option>
+            </select>
+        </div>
+    </div>
+
+    <div style="background:var(--card);border:1px solid var(--border);border-radius:12px;overflow:hidden">
+        <div style="overflow-x:auto">
+            <table>
+                <thead>
+                    <tr>
+                        <th>TIMESTAMP</th>
+                        <th>SESSÃO</th>
+                        <th>AGENTE</th>
+                        <th>USUÁRIO</th>
+                        <th>ENTRADA (MASCARADA)</th>
+                        <th>PII</th>
+                        <th>CLASSIF.</th>
+                        <th>PROVIDER</th>
+                        <th>EXPIRA EM</th>
+                    </tr>
+                </thead>
+                <tbody id="log-body">
+                    <tr><td colspan="9"><div class="skeleton" style="height:2rem;margin:.5rem"></div></td></tr>
+                </tbody>
+            </table>
+        </div>
+        <div class="pagination" style="padding:.8rem 1rem">
+            <span class="page-info" id="page-info">—</span>
+            <div class="page-btns">
+                <button class="btn btn-outline" id="btn-prev" onclick="goPage(-1)" disabled>← Anterior</button>
+                <button class="btn btn-outline" id="btn-next" onclick="goPage(1)"  disabled>Próxima →</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+const token = localStorage.getItem('jwt_token');
+if (!token) { location.href = '/login'; }
+
+// ── helpers ───────────────────────────────────────────────────────────
+function auth() { return { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' }; }
+
+async function apiFetch(url) {
+    const r = await fetch(url, { headers: auth() });
+    if (r.status === 401 || r.status === 403) { location.href = '/login'; }
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    return r.json();
+}
+
+function esc(s) {
+    return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+function fmtTs(ts) {
+    if (!ts) return '—';
+    return ts.replace('T',' ').substring(0,16);
+}
+
+function classBadge(c) {
+    return `<span class="badge badge-${esc(c)}">${esc((c||'').toUpperCase())}</span>`;
+}
+
+function piiBadge(hasPii) {
+    return hasPii
+        ? '<span class="badge badge-pii">PII</span>'
+        : '<span class="badge badge-clean">—</span>';
+}
+
+// ── Charts ────────────────────────────────────────────────────────────
+Chart.defaults.color = '#9a9080';
+Chart.defaults.font.family = "'JetBrains Mono', monospace";
+Chart.defaults.font.size = 10;
+
+let chartDaily, chartClass, chartPii, chartAgent;
+
+const CHART_COLORS = {
+    gold:         'rgba(201,168,76,1)',
+    goldFill:     'rgba(201,168,76,0.15)',
+    goldDim:      'rgba(201,168,76,0.5)',
+    yellow:       'rgba(253,230,138,0.8)',
+    green:        'rgba(110,231,183,0.8)',
+    blue:         'rgba(147,197,253,0.8)',
+    red:          'rgba(252,129,129,0.8)',
+    gridLine:     'rgba(255,255,255,0.05)',
+};
+
+function buildDailyChart(labels, totalData, piiData) {
+    const ctx = document.getElementById('chart-daily').getContext('2d');
+    if (chartDaily) chartDaily.destroy();
+    chartDaily = new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels,
+            datasets: [
+                {
+                    label: 'Total',
+                    data: totalData,
+                    borderColor: CHART_COLORS.gold,
+                    backgroundColor: CHART_COLORS.goldFill,
+                    borderWidth: 2,
+                    pointRadius: 3,
+                    pointBackgroundColor: CHART_COLORS.gold,
+                    fill: true,
+                    tension: 0.35,
+                },
+                {
+                    label: 'Com PII',
+                    data: piiData,
+                    borderColor: CHART_COLORS.yellow,
+                    backgroundColor: 'transparent',
+                    borderWidth: 1.5,
+                    pointRadius: 2,
+                    borderDash: [4,3],
+                    tension: 0.35,
+                },
+            ],
+        },
+        options: {
+            responsive: true, maintainAspectRatio: false,
+            plugins: { legend: { position: 'top', labels: { boxWidth: 10, padding: 14 } } },
+            scales: {
+                x: { grid: { color: CHART_COLORS.gridLine }, ticks: { maxTicksLimit: 10 } },
+                y: { grid: { color: CHART_COLORS.gridLine }, beginAtZero: true, ticks: { precision: 0 } },
+            },
+        },
+    });
+}
+
+function buildClassChart(data) {
+    const ctx = document.getElementById('chart-class').getContext('2d');
+    if (chartClass) chartClass.destroy();
+    chartClass = new Chart(ctx, {
+        type: 'doughnut',
+        data: {
+            labels: ['Public', 'Internal', 'Confidential', 'Restricted'],
+            datasets: [{
+                data: [data.public||0, data.internal||0, data.confidential||0, data.restricted||0],
+                backgroundColor: [
+                    'rgba(110,231,183,0.75)',
+                    'rgba(147,197,253,0.75)',
+                    'rgba(253,230,138,0.75)',
+                    'rgba(252,129,129,0.75)',
+                ],
+                borderWidth: 0,
+                hoverOffset: 6,
+            }],
+        },
+        options: {
+            responsive: true, maintainAspectRatio: false,
+            plugins: {
+                legend: { position: 'bottom', labels: { boxWidth: 10, padding: 12 } },
+            },
+            cutout: '65%',
+        },
+    });
+}
+
+function buildPiiChart(data) {
+    const ctx = document.getElementById('chart-pii').getContext('2d');
+    if (chartPii) chartPii.destroy();
+    const labels = Object.keys(data).map(k => k.toUpperCase());
+    const vals = Object.values(data);
+    chartPii = new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels,
+            datasets: [{
+                label: 'Ocorrências',
+                data: vals,
+                backgroundColor: CHART_COLORS.goldDim,
+                borderColor: CHART_COLORS.gold,
+                borderWidth: 1,
+                borderRadius: 4,
+            }],
+        },
+        options: {
+            responsive: true, maintainAspectRatio: false,
+            plugins: { legend: { display: false } },
+            scales: {
+                x: { grid: { color: CHART_COLORS.gridLine } },
+                y: { grid: { color: CHART_COLORS.gridLine }, beginAtZero: true, ticks: { precision: 0 } },
+            },
+        },
+    });
+}
+
+function buildAgentChart(data) {
+    const ctx = document.getElementById('chart-agent').getContext('2d');
+    if (chartAgent) chartAgent.destroy();
+    const colors = [CHART_COLORS.green, CHART_COLORS.blue, CHART_COLORS.yellow, CHART_COLORS.red];
+    chartAgent = new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels: Object.keys(data).map(k => k.toUpperCase()),
+            datasets: [{
+                label: 'Chamadas',
+                data: Object.values(data),
+                backgroundColor: colors,
+                borderWidth: 0,
+                borderRadius: 4,
+            }],
+        },
+        options: {
+            responsive: true, maintainAspectRatio: false,
+            plugins: { legend: { display: false } },
+            scales: {
+                x: { grid: { color: CHART_COLORS.gridLine } },
+                y: { grid: { color: CHART_COLORS.gridLine }, beginAtZero: true, ticks: { precision: 0 } },
+            },
+        },
+    });
+}
+
+// ── Data loading ──────────────────────────────────────────────────────
+async function loadDashboard() {
+    try {
+        const [dash, daily, alertsData] = await Promise.all([
+            apiFetch('/governance/dashboard'),
+            apiFetch('/governance/daily-stats'),
+            apiFetch('/alerts?status=open'),
+        ]);
+
+        const m = dash.metricas;
+        const r = dash.retencao;
+
+        // KPI cards
+        document.getElementById('kpi-total').textContent     = m.total_consultas.toLocaleString('pt-BR');
+        document.getElementById('kpi-pii').textContent       = m.consultas_com_pii.toLocaleString('pt-BR');
+        document.getElementById('kpi-restricted').textContent = (m.por_classificacao.restricted||0).toLocaleString('pt-BR');
+        document.getElementById('kpi-alerts').textContent    = (alertsData.total||0).toLocaleString('pt-BR');
+        document.getElementById('kpi-total-sub').textContent = `30-day window`;
+        document.getElementById('kpi-pii-sub').textContent   = `${m.percentual_pii}% do total`;
+
+        // Retention stats
+        document.getElementById('ret-with-pii').textContent  = (r.registros_com_pii||0).toLocaleString('pt-BR');
+        document.getElementById('ret-purged').textContent    = (r.registros_pii_purgados||0).toLocaleString('pt-BR');
+        document.getElementById('ret-expiring').textContent  = (r.registros_expirando_30_dias||0).toLocaleString('pt-BR');
+        document.getElementById('ret-oldest').textContent    = r.registro_mais_antigo || '—';
+
+        // Alerts bar
+        const bar = document.getElementById('alerts-bar');
+        const realAlerts = dash.alertas.filter(a => !a.startsWith('Nenhum'));
+        if (realAlerts.length > 0) {
+            bar.textContent = realAlerts.join(' · ');
+            bar.classList.add('show');
+        } else {
+            bar.classList.remove('show');
+        }
+
+        // Charts
+        const labels = daily.dias.map(d => d.date.substring(5)); // MM-DD
+        buildDailyChart(labels, daily.dias.map(d => d.total_queries), daily.dias.map(d => d.queries_with_pii));
+        buildClassChart(m.por_classificacao);
+        buildPiiChart(m.pii_por_tipo);
+        buildAgentChart(m.por_agente && Object.keys(m.por_agente).length ? m.por_agente : {knowledge:0,data:0,action:0});
+
+    } catch (e) {
+        console.error('loadDashboard:', e);
+    }
+}
+
+// ── Audit log ─────────────────────────────────────────────────────────
+let currentPage = 1;
+
+async function loadLog(page) {
+    currentPage = page;
+    const cls  = document.getElementById('f-class').value;
+    const pii  = document.getElementById('f-pii').value;
+    const uname = document.getElementById('f-username').value.trim();
+
+    let url = `/governance/audit-log?page=${page}&limit=20`;
+    if (cls)   url += `&classification=${encodeURIComponent(cls)}`;
+    if (pii)   url += `&has_pii=${pii}`;
+    if (uname) url += `&username=${encodeURIComponent(uname)}`;
+
+    const tbody = document.getElementById('log-body');
+    tbody.innerHTML = '<tr><td colspan="9"><div class="skeleton" style="height:2rem;margin:.5rem"></div></td></tr>';
+
+    try {
+        const data = await apiFetch(url);
+
+        if (!data.registros.length) {
+            tbody.innerHTML = '<tr><td colspan="9"><div class="empty">Nenhum registro encontrado.</div></td></tr>';
+        } else {
+            tbody.innerHTML = data.registros.map(r => `
+                <tr>
+                    <td class="mono trunc" title="${esc(r.timestamp)}">${esc(fmtTs(r.timestamp))}</td>
+                    <td class="mono" style="font-size:.6rem">${esc(r.session_id||'—')}</td>
+                    <td class="mono">${esc(r.agent_name||'—')}</td>
+                    <td class="mono">${esc(r.username||'—')}</td>
+                    <td class="trunc" title="${esc(r.input_masked)}">${esc(r.input_masked||'—')}</td>
+                    <td>${piiBadge(r.input_has_pii)}</td>
+                    <td>${classBadge(r.data_classification)}</td>
+                    <td class="mono" style="font-size:.6rem">${esc(r.provider||'—')}</td>
+                    <td class="mono" style="font-size:.6rem">${esc((r.retention_expires_at||'—').substring(0,10))}</td>
+                </tr>
+            `).join('');
+        }
+
+        document.getElementById('page-info').textContent =
+            `Página ${data.page} de ${data.pages} · ${data.total.toLocaleString('pt-BR')} registros`;
+        document.getElementById('btn-prev').disabled = (page <= 1);
+        document.getElementById('btn-next').disabled = (page >= data.pages);
+
+    } catch(e) {
+        tbody.innerHTML = `<tr><td colspan="9" style="color:var(--red);font-size:.7rem;padding:1rem">Erro ao carregar audit log.</td></tr>`;
+        console.error('loadLog:', e);
+    }
+}
+
+function goPage(delta) { loadLog(currentPage + delta); }
+
+let debounceTimer;
+function debounceReload() {
+    clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(() => loadLog(1), 400);
+}
+
+// ── Actions ───────────────────────────────────────────────────────────
+async function purgeExpired() {
+    if (!confirm('Purgar registros com PII expirado? Esta ação é irreversível.')) return;
+    try {
+        const r = await fetch('/governance/purge-expired', { method: 'POST', headers: auth() });
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        const data = await r.json();
+        alert(`Purgados: ${data.rows_purged} registro(s).`);
+        loadDashboard();
+        loadLog(1);
+    } catch(e) {
+        alert('Erro ao purgar: ' + e.message);
+    }
+}
+
+function exportCsv() {
+    const cls   = document.getElementById('f-class').value;
+    const pii   = document.getElementById('f-pii').value;
+    const uname = document.getElementById('f-username').value.trim();
+    let url = `/governance/audit-log?limit=100&page=1`;
+    if (cls)   url += `&classification=${encodeURIComponent(cls)}`;
+    if (pii)   url += `&has_pii=${pii}`;
+    if (uname) url += `&username=${encodeURIComponent(uname)}`;
+
+    apiFetch(url).then(data => {
+        if (!data.registros.length) { alert('Nenhum dado para exportar.'); return; }
+        const cols = ['timestamp','session_id','agent_name','username','input_masked','input_has_pii','data_classification','provider','retention_expires_at'];
+        const header = cols.join(',');
+        const rows = data.registros.map(r =>
+            cols.map(c => JSON.stringify(r[c] ?? '')).join(',')
+        );
+        const csv = [header, ...rows].join('\n');
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(new Blob([csv], {type:'text/csv'}));
+        a.download = `audit-log-${new Date().toISOString().substring(0,10)}.csv`;
+        a.click();
+    }).catch(e => alert('Erro ao exportar: ' + e.message));
+}
+
+// ── Auto-refresh countdown ────────────────────────────────────────────
+let countdown = 60;
+setInterval(() => {
+    countdown--;
+    document.getElementById('countdown').textContent = countdown;
+    if (countdown <= 0) {
+        countdown = 60;
+        loadDashboard();
+        loadLog(currentPage);
+    }
+}, 1000);
+
+// ── Init ──────────────────────────────────────────────────────────────
+loadDashboard();
+loadLog(1);
+</script>
 </body>
 </html>
