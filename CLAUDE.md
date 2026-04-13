@@ -153,6 +153,10 @@ Endpoints:
 
 Frontend: blinking gold cursor appears immediately on send; tokens render word-by-word; route badge appears on metadata event; source chips and SQL/action blocks appear after streaming completes; conversation sidebar refreshes after done.
 
+## Development Rules
+
+- **NEVER use git worktrees.** Always work directly on `master` or create simple feature branches with `git checkout -b feature/xxx`. Worktrees cause environment fragmentation (missing `.env`, missing DB, missing indexed documents) and should not be used in this project.
+
 ## Architecture Decisions
 
 - **Local-first:** Zero cloud dependency. Ollama for LLM, sentence-transformers for embeddings.
