@@ -1,6 +1,7 @@
 """Coordinator agent — classifies intent and routes to specialized agents."""
 from __future__ import annotations
 
+import json
 from datetime import datetime
 from typing import AsyncGenerator, Optional
 
@@ -226,8 +227,6 @@ class CoordinatorAgent:
             username: Authenticated username for audit logging.
             conversation_history: Prior conversation messages for context injection.
         """
-        import json as _json
-
         init_db()
         session_id = audit.generate_session_id()
         routing = await self._classify(question, provider=provider)
@@ -241,7 +240,7 @@ class CoordinatorAgent:
         }
         agents_used = _route_agents.get(routing, ["knowledge"])
 
-        yield f'data: {_json.dumps({"type": "metadata", "roteamento": routing, "agentes_utilizados": agents_used})}\n\n'
+        yield f'data: {json.dumps({"type": "metadata", "roteamento": routing, "agentes_utilizados": agents_used})}\n\n'
 
         try:
             if routing == "KNOWLEDGE":
@@ -251,20 +250,20 @@ class CoordinatorAgent:
 
                 if prompt is None:
                     msg = "Nenhum documento relevante encontrado para esta pergunta."
-                    yield f'data: {_json.dumps({"type": "token", "content": msg})}\n\n'
-                    yield f'data: {_json.dumps({"type": "done", "pii_detected": False, "data_classification": "public", "session_id": session_id, "full_response": msg})}\n\n'
+                    yield f'data: {json.dumps({"type": "token", "content": msg})}\n\n'
+                    yield f'data: {json.dumps({"type": "done", "pii_detected": False, "data_classification": "public", "session_id": session_id, "full_response": msg})}\n\n'
                     return
 
                 sources = list({
                     f"{c.metadata.get('source', 'Desconhecido')}, p. {c.metadata.get('page', '?')}"
                     for c in chunks
                 })
-                yield f'data: {_json.dumps({"type": "sources", "chunks": sources})}\n\n'
+                yield f'data: {json.dumps({"type": "sources", "chunks": sources})}\n\n'
 
                 full_response = ""
                 async for token in llm_router.generate_stream(prompt, provider=provider):
                     full_response += token
-                    yield f'data: {_json.dumps({"type": "token", "content": token})}\n\n'
+                    yield f'data: {json.dumps({"type": "token", "content": token})}\n\n'
 
                 pii_found = bool(detect_pii(full_response)) or has_pii(question)
                 await audit.log_interaction(
@@ -275,14 +274,14 @@ class CoordinatorAgent:
                     user_id=user_id, username=username,
                 )
                 classification = audit.classify_query("knowledge", pii_found, question)
-                yield f'data: {_json.dumps({"type": "done", "pii_detected": pii_found, "data_classification": classification, "session_id": session_id, "full_response": full_response})}\n\n'
+                yield f'data: {json.dumps({"type": "done", "pii_detected": pii_found, "data_classification": classification, "session_id": session_id, "full_response": full_response})}\n\n'
 
             elif routing == "DATA":
                 response = await self.data_agent.answer(question, provider=provider)
-                yield f'data: {_json.dumps({"type": "token", "content": response.answer})}\n\n'
+                yield f'data: {json.dumps({"type": "token", "content": response.answer})}\n\n'
 
                 if response.data and response.data.get("sql"):
-                    yield f'data: {_json.dumps({"type": "sql", "sql": response.data.get("sql"), "total": response.data.get("total")})}\n\n'
+                    yield f'data: {json.dumps({"type": "sql", "sql": response.data.get("sql"), "total": response.data.get("total")})}\n\n'
 
                 pii_found = bool(detect_pii(response.answer)) or has_pii(question)
                 await audit.log_interaction(
@@ -293,14 +292,14 @@ class CoordinatorAgent:
                     user_id=user_id, username=username,
                 )
                 classification = audit.classify_query("data", pii_found, question)
-                yield f'data: {_json.dumps({"type": "done", "pii_detected": pii_found, "data_classification": classification, "session_id": session_id, "full_response": response.answer})}\n\n'
+                yield f'data: {json.dumps({"type": "done", "pii_detected": pii_found, "data_classification": classification, "session_id": session_id, "full_response": response.answer})}\n\n'
 
             elif routing == "ACTION":
                 response = await self.action_agent.answer(question)
-                yield f'data: {_json.dumps({"type": "token", "content": response.answer})}\n\n'
+                yield f'data: {json.dumps({"type": "token", "content": response.answer})}\n\n'
 
                 if response.actions_taken:
-                    yield f'data: {_json.dumps({"type": "actions", "acoes": response.actions_taken})}\n\n'
+                    yield f'data: {json.dumps({"type": "actions", "acoes": response.actions_taken})}\n\n'
 
                 pii_found = bool(detect_pii(response.answer)) or has_pii(question)
                 await audit.log_interaction(
@@ -311,7 +310,7 @@ class CoordinatorAgent:
                     user_id=user_id, username=username,
                 )
                 classification = audit.classify_query("action", pii_found, question)
-                yield f'data: {_json.dumps({"type": "done", "pii_detected": pii_found, "data_classification": classification, "session_id": session_id, "full_response": response.answer})}\n\n'
+                yield f'data: {json.dumps({"type": "done", "pii_detected": pii_found, "data_classification": classification, "session_id": session_id, "full_response": response.answer})}\n\n'
 
             else:  # KNOWLEDGE+DATA
                 prompt, chunks = await self.knowledge_agent.prepare(
@@ -322,25 +321,25 @@ class CoordinatorAgent:
                     for c in (chunks or [])
                 })
                 if sources:
-                    yield f'data: {_json.dumps({"type": "sources", "chunks": sources})}\n\n'
+                    yield f'data: {json.dumps({"type": "sources", "chunks": sources})}\n\n'
 
-                yield f'data: {_json.dumps({"type": "token", "content": "**Análise Regulatória:**\n"})}\n\n'
+                yield f'data: {json.dumps({"type": "token", "content": "**Análise Regulatória:**\n"})}\n\n'
 
                 full_knowledge = ""
                 if prompt:
                     async for token in llm_router.generate_stream(prompt, provider=provider):
                         full_knowledge += token
-                        yield f'data: {_json.dumps({"type": "token", "content": token})}\n\n'
+                        yield f'data: {json.dumps({"type": "token", "content": token})}\n\n'
 
-                yield f'data: {_json.dumps({"type": "token", "content": "\n\n**Análise de Dados:**\n"})}\n\n'
+                yield f'data: {json.dumps({"type": "token", "content": "\n\n**Análise de Dados:**\n"})}\n\n'
 
                 d_resp = await self.data_agent.answer(
                     question, extra_context=full_knowledge, provider=provider
                 )
-                yield f'data: {_json.dumps({"type": "token", "content": d_resp.answer})}\n\n'
+                yield f'data: {json.dumps({"type": "token", "content": d_resp.answer})}\n\n'
 
                 if d_resp.data and d_resp.data.get("sql"):
-                    yield f'data: {_json.dumps({"type": "sql", "sql": d_resp.data.get("sql"), "total": d_resp.data.get("total")})}\n\n'
+                    yield f'data: {json.dumps({"type": "sql", "sql": d_resp.data.get("sql"), "total": d_resp.data.get("total")})}\n\n'
 
                 full_response = (
                     f"**Análise Regulatória:**\n{full_knowledge}\n\n"
@@ -367,11 +366,10 @@ class CoordinatorAgent:
                 _order = ["public", "internal", "confidential", "restricted"]
                 classification = k_class if _order.index(k_class) >= _order.index(d_class) else d_class
 
-                yield f'data: {_json.dumps({"type": "done", "pii_detected": pii_found, "data_classification": classification, "session_id": session_id, "full_response": full_response})}\n\n'
+                yield f'data: {json.dumps({"type": "done", "pii_detected": pii_found, "data_classification": classification, "session_id": session_id, "full_response": full_response})}\n\n'
 
         except Exception as exc:
-            import json as _json2
-            yield f'data: {_json2.dumps({"type": "error", "message": str(exc)})}\n\n'
+            yield f'data: {json.dumps({"type": "error", "message": str(exc)})}\n\n'
 
     async def _classify(self, question: str, provider: str = "ollama") -> str:
         # Short-circuit: conversational/meta questions always go to KNOWLEDGE
