@@ -24,18 +24,18 @@ Assistente inteligente que ingere normativos do Banco Central (BCB), CVM e CMN, 
 
 ## 🎯 O que este projeto demonstra
 
-| Competência | Implementação | Vagas que pedem |
-|-------------|--------------|-----------------|
-| RAG avançado | Reranking multilingual, document-aware retrieval, prompt anti-alucinação | CashMe, Neon, CI&T, Banco BV, Tinnova |
-| Agentes autônomos | 4 agentes especializados + coordenador com roteamento por keywords | CashMe, Neon, Tinnova, Radix |
-| Multi-LLM sem lock-in | Ollama + Claude API com toggle, benchmark comparativo | CashMe, Neon, CI&T |
-| LGPD / Governança | Detecção de PII, mascaramento, audit trail, retenção, dashboard | Banco BV, Radix, LF RH |
-| Avaliação sistemática (Evals) | 15 perguntas-teste, Claude como juiz, 5 critérios | Neon, CashMe, CI&T |
-| SSE Streaming | Respostas token-por-token em tempo real | CashMe, Neon |
-| Autenticação JWT | Roles (analyst/manager), controle de acesso por endpoint | Banco BV, Radix |
-| Memória conversacional | Histórico persistente, contexto injetado no prompt | CashMe |
-| Docker + CI/CD | Dockerfile, docker-compose, GitHub Actions (142 testes) | Tinnova, Luby, CI&T, Radix |
-| FastAPI + Python | API REST async, SSE streaming, Pydantic models | Todas as vagas |
+| Competência | Implementação |
+|-------------|--------------|
+| RAG avançado | Reranking multilingual, document-aware retrieval, prompt anti-alucinação |
+| Agentes autônomos | 4 agentes especializados + coordenador com roteamento por keywords |
+| Multi-LLM sem lock-in | Ollama + Claude API com toggle, benchmark comparativo |
+| LGPD / Governança | Detecção de PII, mascaramento, audit trail, retenção, dashboard |
+| Avaliação sistemática (Evals) | 15 perguntas-teste, Claude como juiz, 5 critérios |
+| SSE Streaming | Respostas token-por-token em tempo real |
+| Autenticação JWT | Roles (analyst/manager), controle de acesso por endpoint |
+| Memória conversacional | Histórico persistente, contexto injetado no prompt |
+| Docker + CI/CD | Dockerfile, docker-compose, GitHub Actions (142 testes) |
+| FastAPI + Python | API REST async, SSE streaming, Pydantic models |
 
 ---
 
